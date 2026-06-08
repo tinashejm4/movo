@@ -40,6 +40,9 @@ INSTALLED_APPS = [
     'users.apps.UsersConfig',
     'packages.apps.PackagesConfig',
     'bookkeeping.apps.BookkeepingConfig',
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
@@ -50,7 +53,18 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",   # Next.js dev server
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+}
 
 ROOT_URLCONF = 'Movo.urls'
 
