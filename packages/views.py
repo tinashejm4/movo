@@ -1,15 +1,76 @@
-# from rest_framework import status
-# from django.shortcuts import get_object_or_404
-# from rest_framework.views import APIView
-# from rest_framework.response import Response
-# from rest_framework_simplejwt.tokens import RefreshToken
-# from rest_framework.permissions import IsAuthenticated
-# from django.contrib.auth.models import User
-# from rest_framework.decorators import api_view
-# from users.models import Contact, Customer, Shop
-# from packages.models import Package, Batch, Trip
+import random
+import string
+
+from rest_framework import status
+from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.permissions import IsAuthenticated
+from django.contrib.auth.models import User
+from rest_framework.decorators import api_view
+from users.models import Contact, Customer, Branch, Staff
+from .models import Package, Batch,PrePackage, Price, PackageDimension
 # from bookkeeping.models import Sale, TransportPayment, DropOffPayment,PickUpPayment,ReceipientCode
-# import datetime
+import datetime
+
+class CreatePrePackage(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def generate_code(self):
+        letters = ''.join(random.choices(string.ascii_uppercase, k=3))
+        numbers = ''.join(random.choices(string.digits, k=3))
+        return f"{letters}{numbers}"
+
+    def post(self, request):
+        data = request.data
+
+        sender_number = data.get("sender_number")
+        receiver_name = data.get("receiver_name")
+        receiver_number = data.get("receiver_number")
+        receiving_shop_id = data.get("receiving_shop_id")
+        description = data.get("description")
+        self_created = data.get("self_created")
+
+        code = self.generate_code()
+        while PrePackage.objects.filter(creation_code = code).exists():
+            code = self.generate_code()
+
+        if not Contact.objects.filter(phone_number = sender_number).exists():
+            sender, sender_contact = self.create_new_customer(sender_number)  
+        else:
+            sender_user = Contact.objects.get(phone_number = sender_number).user 
+            sender = Customer.objects.get(user = sender_user)
+
+        if not Contact.objects.filter(phone_number = receiver_number).exists():
+            receiver, receiver_contact = self.create_new_customer(receiver_number, receiver_name)  
+        else:
+            receiver_user = Contact.objects.get(phone_number = receiver_number).user
+            receiver = Customer.objects.get(user = receiver_user)
+
+        PrePackage.objects.create(
+            creation_code = code,
+            sender = sender,
+            receiver = receiver,
+            to_shop = get_object_or_404(Branch, id = receiving_shop_id),
+            self_created = self_created,
+            description = description
+        )
+        response = {
+            "message": "Pre-package created successfully",
+            "code": code
+        }
+        return Response(response, status = status.HTTP_201_CREATED)
+
+    def create_new_customer(self, phone_number, name = None):
+        if not name:
+            name = "Unknown"
+        first_name = name.strip().split(" ")[0]
+        last_name = name.strip().split(" ")[1] if len(name.strip().split(" ")) > 1 else ""
+        user = User.objects.create(first_name = first_name, last_name = last_name)
+        contact = Contact.objects.create(user = user, phone_number = phone_number)
+        customer = Customer.objects.create(user = user)
+        return customer, contact
 
 # class Package(APIView):
 

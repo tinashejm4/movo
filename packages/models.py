@@ -1,129 +1,91 @@
-# from django.db import models
-# from django.contrib.auth.models import User
-# import random
-# import string
+from django.db import models
+from django.contrib.auth.models import User
+import random
+import string
+from users.models import Branch, Customer, Staff
+       
+class PrePackage(models.Model):
+    slug = models.SlugField(max_length=250, null = False, blank =False, editable=False)
+    creation_code = models.CharField(max_length = 20)
+    sender = models.ForeignKey(Customer, on_delete = models.CASCADE, related_name = "sender")
+    receiver = models.ForeignKey(Customer, on_delete = models.CASCADE, related_name = "receiver")
+    self_created = models.BooleanField(default = False)
+    to_shop = models.ForeignKey(Branch, on_delete = models.CASCADE,default=None, related_name = "to_shop")
+    added_at   = models.DateTimeField(auto_now_add = True)
+    
+    def __str__(self):
+        return f'{self.creation_code} - {self.sender} to {self.receiver}'
 
-# def generate_otp_code(n_letters,n_numbers):
-#     letters = ''.join(random.choices(string.ascii_uppercase, k=n_letters))
-#     numbers = ''.join(random.choices(string.digits, k=n_numbers))
-#     return f"{letters}{numbers}"
+class Batch(models.Model):
+    sent_from_shop = models.ForeignKey(Branch, on_delete = models.CASCADE, related_name = "batch_sent_from_shop")
+    sent_to_shop = models.ForeignKey(Branch, on_delete = models.CASCADE, related_name = "batch_sent_to_shop")
+    is_available = models.BooleanField(default = True)
+    added_at   = models.DateTimeField(auto_now_add = True)
 
-# class PackageSize(models.Model):
-#     size = models.CharField(max_length = 20)
+    def __str__(self):
+        return f'{self.id} - {self.sent_from_shop} to {self.sent_to_shop}'
 
-#     def __str__(self):
-#         return f'{self.size}'
+class PackageDimension(models.Model):
+    length = models.FloatField(default = 0)
+    width = models.FloatField(default = 0)
+    height = models.FloatField(default = 0)
+    weight = models.FloatField(default = 0)
+    dimensional_factor = models.IntegerField(default = 5000)
 
-# class Batch(models.Model):
-#     origin_location = models.ForeignKey(User, on_delete = models.CASCADE, related_name = "from_shop")
-#     destination_location = models.ForeignKey(User, on_delete = models.CASCADE, related_name = "to_shop")
-#     is_available = models.BooleanField(default = True)
+    def get_size(self):
+        if self.get_charged_weight() <= 1:
+            return "Small"
+        elif self.get_charged_weight() <= 5:
+            return "Medium" 
+        elif self.get_charged_weight() <= 10:
+            return "Large"
+        else:
+            return "Extra Large"
+    
+    def get_charged_weight(self):
+        volumetric_weight = (self.length * self.width * self.height) / self.dimensional_factor
+        return max(self.weight, volumetric_weight)
 
-#     def __str__(self):
-#         return f'{self.origin_location} to {self.destination_location} - {self.id}'
-  
-# class Price(models.Model):
-#     package_size = models.ForeignKey(PackageSize, on_delete = models.CASCADE)
-#     price = models.FloatField(default = 0)
-#     active = models.BooleanField(default = True)
-#     added_at   = models.DateField(auto_now_add = True)
+    def __str__(self):
+        return f'{self.length}x{self.width}x{self.height} - {self.weight}kg'
 
-#     def __str__(self):
-#         return f'{self.price} on {self.added_at}'
+class Price(models.Model):
+    dimensional_factor = models.IntegerField(default = 5000)
+    base_fee = models.FloatField(default = 2)
+    rate_per_kg = models.FloatField(default = 0.5)
+    added_at   = models.DateTimeField(auto_now_add = True)
 
-# class Package(models.Model):
-#     slug = models.SlugField(max_length=250, null = False, blank =False, editable=False)
-#     name = models.CharField(max_length = 20)
-#     batch = models.ForeignKey(Batch, on_delete = models.CASCADE, related_name = "sender")
-#     sender = models.ForeignKey(User, on_delete = models.CASCADE, related_name = "sender")
-#     receiver = models.ForeignKey(User, on_delete = models.CASCADE, related_name = "receiver")
-#     size = models.ForeignKey(PackageSize, on_delete = models.CASCADE)
-#     price = models.ForeignKey(Price, on_delete = models.CASCADE)
-#     logged_by = models.ForeignKey(User, on_delete = models.CASCADE, related_name = "logged_by")
-#     collected = models.BooleanField(default = False)
-#     collected_at = models.DateField(blank = True)
-#     added_at   = models.DateField(auto_now_add = True)
+    def __str__(self):
+        return f'Rate {self.rate_per_kg} - ${self.base_fee:00}'
 
-#     def __str__(self):
-#         return f'{self.name}'
+class Payment(models.Model):
 
-# class City(models.Model):
-#     city = models.CharField(max_length=150)
+    price = models.ForeignKey(Price, on_delete = models.CASCADE)
+    amount = models.FloatField(default = 0) # self.price.base_fee + (self.price.rate_per_kg * charged_weight)
+    is_pay_forward = models.BooleanField(default = False)
+    method = models.CharField(max_length = 20)
+    paid_at = models.DateTimeField(auto_now_add = True)
 
-#     def __str__(self):
-#         return f'{self.city}'
+    def __str__(self):
+        if self.is_pay_forward:
+            return f'Pay forward of {self.amount} via {self.method}'
+        else:
+            return f'Payment of {self.amount} via {self.method}'
+    
+class Package(models.Model):
+    slug = models.SlugField(max_length=250, null = False, blank =False, editable=False)
+    pre_package = models.OneToOneField(PrePackage, on_delete = models.CASCADE, default = None)
+    batch = models.ForeignKey(Batch, on_delete = models.CASCADE, related_name = "sender")
+    dimensions = models.ForeignKey(PackageDimension, on_delete = models.CASCADE)
+    payment = models.ForeignKey(Payment, on_delete = models.CASCADE)
+    receiver_code = models.CharField(max_length = 20)
+    sent_from_shop = models.ForeignKey(Branch, on_delete = models.CASCADE, related_name = "package_sent_from_shop")
+    sent_to_shop = models.ForeignKey(Branch, on_delete = models.CASCADE, related_name = "package_sent_to_shop")
+    description = models.CharField(max_length = 200, null = True, blank = True)
+    logged_by = models.ForeignKey(Staff, on_delete = models.CASCADE, related_name = "logged_by")
+    added_at   = models.DateTimeField(auto_now_add = True)
+    is_collected = models.BooleanField(default = False)
+    collected_at = models.DateTimeField(blank = True)
 
-# class CitySection(models.Model):
-#     city = models.ForeignKey(City, on_delete=models.CASCADE)
-#     section = models.CharField(max_length=150)
-
-#     def __str__(self):
-#         return f'{self.section}'
-
-# class Location(models.Model):
-#     section = models.ForeignKey(CitySection, on_delete=models.CASCADE)
-#     name = models.CharField(max_length=150)
-#     distance_from_cbd = models.FloatField(default = 0)
-
-#     def __str__(self):
-#         return f'{self.name}'
-
-# class Rate(models.Model):
-#     transport_rate = models.FloatField(default = 0, editable = False)
-#     dropoff_rate = models.FloatField(default = 0, editable = False)
-#     pickup_rate = models.FloatField(default = 0, editable = False)
-#     added_at = models.DateField(auto_now_add = True)
-
-#     def __str__(self):
-#         return f"${self.rate:00}"
-
-# class Trip(models.Model):
-#     driver = models.ForeignKey(User, on_delete = models.CASCADE, null = True)
-#     batch  = models.ForeignKey(Batch, on_delete = models.CASCADE)
-#     rate   = models.ForeignKey(Rate, on_delete = models.CASCADE)
-#     cost = models.FloatField(default = 0)
-#     added_at = models.DateField(auto_now_add = True)
-#     ended = models.BooleanField(default = False)
-#     ended_at = models.DateField(blank = True)
-
-#     def __str__(self):
-#         return self.batch
-
-
-#     def save(self, *args, **kwargs):
-#         if not self.code:
-#             new_code = generate_otp_code(2,4)
-#             while DriverCode.objects.filter(code=new_code).exists():
-#                 new_code = generate_otp_code()
-#             self.code = new_code
-#         super().save(*args, **kwargs)
-
-# class ReceipientCode(models.Model):
-#     package = models.OneToOneField(Package, on_delete = models.CASCADE)
-#     code = models.CharField(max_length = 20)
-
-#     def __str__(self):
-#         return f'{self.package}'
-
-#     def save(self, *args, **kwargs):
-#         if not self.code:
-#             new_code = "P"+generate_otp_code(3,4)
-#             while DriverCode.objects.filter(code=new_code).exists():
-#                 new_code = "P"+generate_otp_code(3,4)
-#             self.code = new_code
-#         super().save(*args, **kwargs)
-
-# class DriverCode(models.Model):
-#     batch = models.OneToOneField(Batch, on_delete = models.CASCADE)
-#     code = models.CharField(max_length = 20)
-
-#     def __str__(self):
-#         return f'{self.package}'
-
-#     def save(self, *args, **kwargs):
-#         if not self.code:
-#             new_code = "B"+generate_otp_code(2,4)
-#             while DriverCode.objects.filter(code=new_code).exists():
-#                 new_code = "B"+generate_otp_code(2,4)
-#             self.code = new_code
-#         super().save(*args, **kwargs)
+    def __str__(self):
+        return f'{self.id} - {self.sent_from_shop} - {self.sent_to_shop} '
