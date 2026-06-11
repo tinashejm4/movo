@@ -18,11 +18,14 @@ class Staff(models.Model):
     date_joined = models.DateField(auto_now_add=True)
 
     def __str__(self):
-        return f'{self.first_name} {self.last_name}'
+        return f'{self.user.first_name} {self.user.last_name}'
 
 class Customer(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     date_joined = models.DateField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.user.first_name} {self.user.last_name}'
 
 # ______________________________________________________________________________________
 

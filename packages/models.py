@@ -52,6 +52,7 @@ class PackageDimension(models.Model):
 class Price(models.Model):
     dimensional_factor = models.IntegerField(default = 5000)
     base_fee = models.FloatField(default = 2)
+    insurance_fee = models.FloatField(default = 1)
     rate_per_kg = models.FloatField(default = 0.5)
     added_at   = models.DateTimeField(auto_now_add = True)
 
@@ -63,7 +64,6 @@ class Payment(models.Model):
     price = models.ForeignKey(Price, on_delete = models.CASCADE)
     amount = models.FloatField(default = 0) # self.price.base_fee + (self.price.rate_per_kg * charged_weight)
     is_pay_forward = models.BooleanField(default = False)
-    method = models.CharField(max_length = 20)
     paid_at = models.DateTimeField(auto_now_add = True)
 
     def __str__(self):
@@ -79,13 +79,12 @@ class Package(models.Model):
     dimensions = models.ForeignKey(PackageDimension, on_delete = models.CASCADE)
     payment = models.ForeignKey(Payment, on_delete = models.CASCADE)
     receiver_code = models.CharField(max_length = 20)
-    sent_from_shop = models.ForeignKey(Branch, on_delete = models.CASCADE, related_name = "package_sent_from_shop")
-    sent_to_shop = models.ForeignKey(Branch, on_delete = models.CASCADE, related_name = "package_sent_to_shop")
     description = models.CharField(max_length = 200, null = True, blank = True)
-    logged_by = models.ForeignKey(Staff, on_delete = models.CASCADE, related_name = "logged_by")
-    added_at   = models.DateTimeField(auto_now_add = True)
+    logged_by = models.ForeignKey(User, on_delete = models.CASCADE, related_name = "logged_by")
     is_collected = models.BooleanField(default = False)
-    collected_at = models.DateTimeField(blank = True)
+    collected_at = models.DateTimeField(blank = True, null=True)
+    added_at   = models.DateTimeField(auto_now_add = True, null=True)
+
 
     def __str__(self):
-        return f'{self.id} - {self.sent_from_shop} - {self.sent_to_shop} '
+        return f'{self.id} - {self.batch.sent_from_shop} - {self.batch.sent_to_shop} '

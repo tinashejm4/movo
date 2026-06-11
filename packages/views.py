@@ -1,6 +1,6 @@
 import random
 import string
-
+import math
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
@@ -10,15 +10,16 @@ from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.models import User
 from rest_framework.decorators import api_view
 from users.models import Contact, Customer, Branch, Staff
-from .models import Package, Batch,PrePackage, Price, PackageDimension
+from .models import Package, Batch, Payment,PrePackage, Price, PackageDimension
+from users.permissions import IsStaff
 # from bookkeeping.models import Sale, TransportPayment, DropOffPayment,PickUpPayment,ReceipientCode
 import datetime
 
-class CreatePrePackage(APIView):
-    permission_classes = [IsAuthenticated]
+class PrePackageView(APIView):
+    # permission_classes = [IsAuthenticated]
 
     def generate_code(self):
-        letters = ''.join(random.choices(string.ascii_uppercase, k=3))
+        letters = ''.join(random.choices(string.ascii_uppercase, k=2))
         numbers = ''.join(random.choices(string.digits, k=3))
         return f"{letters}{numbers}"
 
@@ -29,7 +30,6 @@ class CreatePrePackage(APIView):
         receiver_name = data.get("receiver_name")
         receiver_number = data.get("receiver_number")
         receiving_shop_id = data.get("receiving_shop_id")
-        description = data.get("description")
         self_created = data.get("self_created")
 
         code = self.generate_code()
@@ -37,7 +37,7 @@ class CreatePrePackage(APIView):
             code = self.generate_code()
 
         if not Contact.objects.filter(phone_number = sender_number).exists():
-            sender, sender_contact = self.create_new_customer(sender_number)  
+            sender, sender_contact = self.create_new_customer(sender_number, sender_number)  
         else:
             sender_user = Contact.objects.get(phone_number = sender_number).user 
             sender = Customer.objects.get(user = sender_user)
@@ -54,7 +54,6 @@ class CreatePrePackage(APIView):
             receiver = receiver,
             to_shop = get_object_or_404(Branch, id = receiving_shop_id),
             self_created = self_created,
-            description = description
         )
         response = {
             "message": "Pre-package created successfully",
@@ -65,203 +64,89 @@ class CreatePrePackage(APIView):
     def create_new_customer(self, phone_number, name = None):
         if not name:
             name = "Unknown"
-        first_name = name.strip().split(" ")[0]
-        last_name = name.strip().split(" ")[1] if len(name.strip().split(" ")) > 1 else ""
-        user = User.objects.create(first_name = first_name, last_name = last_name)
+            first_name = name
+            last_name = ""
+        else:
+            first_name = name.strip().split(" ")[0]
+            last_name = name.strip().split(" ")[1] if len(name.strip().split(" ")) > 1 else ""
+        
+        user = User.objects.create(username = phone_number, first_name = first_name, last_name = last_name)
         contact = Contact.objects.create(user = user, phone_number = phone_number)
         customer = Customer.objects.create(user = user)
         return customer, contact
 
-# class Package(APIView):
 
-#     permission_classes = [IsAuthenticated]
+class PackageView(APIView):
 
-#     def response(self, package):
-#         response = {
-#             "name": f"{package.batch.id:04}-{package.id:04}",
-#             "sender": sender,
-#             "receiver": receiver,
-#             "from_shop": origin,
-#             "to_shop": destination,
-#             "size": size,
-#             "price": price,
-#             "logged_by": logged_by
-#         }
-#         return response
+    permission_classes = [IsAuthenticated, IsStaff]
+    dimensional_factor = 5000
 
-#     def create_new_customer(self, name, phone_number):
-#         name_l = name.strip().split(" ")
-#         first_name = name_l[0]
-#         last_name = sender_name_l[1]
-#         new_user = User.objects.create(first_name = first_name, last_name = last_name)
-#         new_contact = Contact.objects.create(user = new_user, phone_number = phone_number)
-#         new_customer = Customer.objects.create(user = new_user)
+    def get(self, request):
+        package_id = request.data.get("id")
+        package = get_object_or_404(Package, id = package_id)
+        response = {
+            "name": f"{package.batch.id:04}-{package.id:04}",
+            "sender": package.sender,
+            "receiver": package.receiver,
+            "from_shop": package.batch.sent_from_shop,
+            "to_shop": package.batch.sent_to_shop,
+            "size": package.dimensions.get_size(),
+            "price": package.price,
+            "logged_by": package.logged_by
+        }
+        return Response(response)
+    
+    def generate_code(self):
+        letters = ''.join(random.choices(string.ascii_uppercase, k=1))
+        numbers = ''.join(random.choices(string.digits, k=5))
+        return f"{letters}{numbers}"
+    
+    def post(self, request):
+        data = request.data
+        print(data)
 
-#         return new_user        
+        pre_package_code = data.get("pre_package_code")
+        dimensions_length = data.get("length")
+        dimensions_width = data.get("width")
+        dimensions_height = data.get("height")
+        dimensions_weight = data.get("weight")
+        description = data.get("description"),
+        is_pay_forward = data.get("is_pay_forward")
 
-#     def is_batch_full(self, batch):
-#         #logic to check the volume of packages depending on the 
-#         return False
+        pre_package = get_object_or_404(PrePackage, creation_code = pre_package_code)
 
-#     def post(self, request):
-#         #get or create users using phone numbers 
-#         sender_name = request.data["sender_name"]
-#         sender_number = request.data["sender_number"]
-#         receiver_name = request.data["receiver_name"]
-#         receiver_number = request.data["receiver_number"]
+        dimensions = PackageDimension.objects.create(
+            length = dimensions_length, 
+            width = dimensions_width, 
+            height = dimensions_height, 
+            weight = dimensions_weight,
+            dimensional_factor = self.dimensional_factor
+            )
+        price = Price.objects.all().last()
 
-#         sender_contact = Contact.objects.filter(phone_number = sender_number)
-#         receiver_contact = Contact.objects.filter(phone_number = receiver_number)
+        batch = Batch.objects.filter(sent_from_shop = pre_package.to_shop, sent_to_shop = pre_package.to_shop, is_available = True).first()
+        if not batch:
+            batch = Batch.objects.create(sent_from_shop = pre_package.to_shop, sent_to_shop = pre_package.to_shop)
 
-#         if sender_contact.exists:
-#             sender = self.create_new_customer(sender_name, sender_number)
-#         if receiver_contact.exists:
-#             receiver = self.create_new_customer(receiver_name, receiver_number)
+        payment = Payment.objects.create(
+            price = price, 
+            amount = math.ceil(price.base_fee + price.insurance_fee + (price.rate_per_kg * dimensions.get_charged_weight())), 
+            is_pay_forward = is_pay_forward)
         
-#         # Origin and destinations
-#         origin_id = request.data["origin_id"]
-#         destination_id = request.data["destination_id"]
+        receiver_code = self.generate_code()
 
-#         origin = get_object_or_404(Shop, id = origin_id)
-#         destination = get_object_or_404(Shop, id = destination_id)
+        package = Package.objects.create(
+            pre_package = pre_package,
+            batch = batch,
+            dimensions = dimensions,
+            payment = payment,
+            receiver_code = receiver_code,
+            description = description,
+            logged_by = request.user
+        )
 
-#         size = get_object_or_404(Size, id = origin_id)
-#         price = get_object_or_404(Price, package_size = size)
-
-#         #logged by
-#         logged_by = User.objects.get(id = 1)
-
-#         #Batch Creation
-#         batch = Batch.objects.filter(origin_location = origin, destination_location = destination, is_available = True)
-#         if not batch.exists:
-#             batch = Batch.objects.create(origin_location = origin, destination_location = destination)
-
-#         # create package
-#         package = Package(
-#             name = f"{origin_id}{destination_id}-{package.id}",
-#             sender = sender,
-#             receiver = receiver,
-#             size = size,
-#             price = price,
-#             logged_by = logged_by
-#         )
-
-#         #Close batch if full
-#         if self.is_batch_full(batch):
-#             batch.is_available = False
-#             batch.save()
-
-#         # Create receipient otp code and send on whatsapp
-#         receipient_otp_code = ReceipientCode.objects.create(package = package)
-
-
-#         #log sale
-#         sale = Sale.objects.create(amount = Price.price, package = package)
-
-#         return Response(self.response(package))
-
-#     def get(self, request):
-#         package_id = request.data.get["id"]
-#         package = Package.objects.get(id = package_id)
-#         return Response(self.response(package))
-
-# class Batch(APIView):
-
-#     def get(self, request):
-#         batch_id = request.data.get["id"]
-#         batch = Batch.objects.get(id = batch_id)
-        
-#         packages = Package.objects.filter(batch = batch)
-#         package_results = []
-#         for package in packages:
-#             package_results.append(
-#                 {   
-#                     package_id: package.id,
-#                     package_name: package.name,
-#                     size: package.size,
-#                     logged_by: package.logged_by,
-#                     date_added: package.date_added
-#                 }
-#             ) 
-
-#         response = {
-#             "batch_id", f"{batch.id:04}",
-#             "from_shop": origin_location.name,
-#             "to_shop": destination_location.name,
-#             "date_added": batch.date_added, 
-#             "status": batch.is_available,
-#             "packages": package_results
-#         }
-        
-#         return Response(response)
-
-# class Trip(APIView):
-
-#     def round_to_half(self,x):
-#         return round(x * 2) / 2
-
-#     def post(self, request):
-#         batch_id = request.data.get["id"]
-#         batch = Batch.objects.get(id = batch_id)
-#         distance_from_cbd = destination_location.distance_from_cbd
-#         rate = Rate.objects.all().last
-#         cost = round_to_half(distance_from_cbd * rate.rate)
-#         trip = Trip.objects.create(batch = batch, cost = cost, rate = rate)
-        
-#         # TO DO for driver you will need to send messages to a new driver every 2 minutes so they accept 
-#         #notify clients package has been picked up
-#         # create payment to driver
-#         payment = TransportPayment.objects.create(amount = cost, batch = batch)
-
-#         # create code for driver and send
-#         code = DriverCode.objects.create(batch= batch)
-#         return ({"cost": cost})
-
-#     def get(self, request):
-#         batch_id = request.data.get["id"]
-#         batch = Batch.objects.get(id = batch_id)
-
-#         trip = Trip.objects.get(batch = batch)
-#         return ({"cost": trip.cost})
-
-# class EndTrip(APIView):
-
-#     def post(self, request):
-#         batch_id = request.data.get["batch_id"]
-#         trip_id = request.data.get["trip_id"]
-#         trip = Trip.objects.get(id = trip_id)
-#         trip.ended = True
-#         trip.ended_at = datetime.datetime.now()
-        
-#         batch = Batch,objects.get(id = batch_id)
-#         #get bath details
-#         num_packages = Package.objects.filter(batch = batch)
-#         dropoff_amount = Rate.objects.all().last.dropoff_amount * num_packages
-
-#         #credit amount to collection point
-#         dropoff_payment = DropOffPayment.objects.create(amount = dropoff_amount, batch = batch)
-
-#         # send whatsapp message to the collectin point
-
-#         return Response({})
-
-# class PackagePickup(APIView):
-
-#     def post(self, request):
-#         package_id = request.data.get["package_id"]
-        
-#         package = Package.objects.get(id = package_id)
-
-#         #edit package details
-#         package.collected = True
-#         package.collected_at = datetime.datetime.now()
-#         package.save()
-
-
-#         #credit amount to collection point
-#         pickup_payment = PickUpPayment.objects.create(amount = dropoff_amount, package = package)
-
-#         # send whatsapp message to the collectin point with
-#         # send message to ustomer notifying of their collection
-
-#         return Response({})
+        response = {
+            "message": "Package created successfully",
+            "package_name": f"{package.batch.id:04}-{package.id:04}"
+        }
+        return Response(response, status=status.HTTP_201_CREATED)
