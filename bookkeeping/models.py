@@ -1,11 +1,13 @@
 from django.db import models
 from intercity.models import Package, Batch, Payment
+from intracity.models import Invoice
 from users.models import Branch
 from django.contrib.auth.models import User
 
 class Account(models.Model):
     name = models.CharField(max_length = 50)
     branch = models.ForeignKey(Branch, on_delete = models.CASCADE, blank = True, null = True)
+    owner = models.ForeignKey(User, on_delete = models.SET_NULL, null = True)
     currency = models.CharField(max_length = 10, default = "USD")
     description = models.TextField(blank = True, null = True)
     number = models.CharField(max_length = 20, blank = True, null = True)
@@ -14,23 +16,29 @@ class Account(models.Model):
     def __str__(self):
         return f"{self.name} - {self.number}"
 
-class Sale(models.Model):
+class IntracitySale(models.Model):
     account = models.ForeignKey(Account, on_delete = models.CASCADE)
-    payment = models.OneToOneField(Payment, on_delete = models.CASCADE)
+    invoice = models.OneToOneField(Invoice, on_delete=models.CASCADE, null=True, blank=True)
+    amount = models.FloatField(default = 0)
+    added_at = models.DateField(auto_now_add = True)
+
+class InterCitySale(models.Model):
+    account = models.ForeignKey(Account, on_delete = models.CASCADE)
+    intercity_invoice = models.OneToOneField(Payment, on_delete = models.CASCADE, null=True, blank=True)
     amount = models.FloatField(default = 0)
     added_at = models.DateField(auto_now_add = True)
     added_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True)
     
     def __str__(self):
-        return f"${self.amount:00} for Package {self.package}"
+        return f"${self.amount:00} for InterCity Invoice {self.intercity_invoice}"
 
-class Receipt(models.Model):
-    sale = models.OneToOneField(Sale, on_delete = models.CASCADE)
-    image = models.ImageField(upload_to = 'receipts/')
-    added_at = models.DateField(auto_now_add = True)
+# class Receipt(models.Model):
+#     sale = models.OneToOneField(Sale, on_delete = models.CASCADE)
+#     image = models.ImageField(upload_to = 'receipts/')
+#     added_at = models.DateField(auto_now_add = True)
 
-    def __str__(self):
-        return f"Receipt for Sale {self.sale}"
+#     def __str__(self):
+#         return f"Receipt for Sale {self.sale}"
 
 class ExpenseType(models.Model):
     name = models.CharField(max_length = 50)
@@ -90,7 +98,7 @@ class FundsTransfer(models.Model):
     added_at = models.DateField(auto_now_add = True)
 
     def __str__(self):
-        return f"Transfer of ${self.amount:00} from {self.from_branch} to {self.to_branch}"
+        return f"Transfer of ${self.amount:00} from {self.from_account} to {self.to_account}"
 
 class Charge(models.Model):
     account = models.ForeignKey(Account, on_delete = models.CASCADE)

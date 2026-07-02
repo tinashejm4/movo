@@ -18,7 +18,7 @@ from rest_framework.decorators import api_view
 from users.models import Contact, Customer, Branch, Staff
 from .models import Package, Batch, Payment,PrePackage, Price, PackageDimension, PaymentRequest, ExchangeRate
 from users.permissions import IsStaff
-from bookkeeping.models import Account, Sale, Expense, TransportExpense, ExpenseType
+from bookkeeping.models import Account, Expense, TransportExpense, ExpenseType
 import datetime
 
 

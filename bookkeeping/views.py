@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from intercity.models import Batch
-from .models import Account, Charge, EndOfDayBalance, Expense, ExpenseType, FundsTransfer, Sale, TransportExpense
+from .models import InterCitySale, Account, Charge, EndOfDayBalance, Expense, ExpenseType, FundsTransfer,  TransportExpense
 
 
 def _parse_date(value):
@@ -77,7 +77,7 @@ def _daily_account_metrics(account, staff_branch, target_date):
     opening_balance = _opening_balance_for_date(account, target_date)
 
     day_sales = float(
-        Sale.objects.filter(account=account, added_at=target_date).aggregate(total=Sum("amount"))["total"] or 0
+        # Sale.objects.filter(account=account, added_at=target_date).aggregate(total=Sum("amount"))["total"] or 0
     )
     day_expenses = float(
         _branch_expenses_qs(staff_branch).filter(account_id=account.id, added_at=target_date).aggregate(total=Sum("amount"))["total"] or 0
@@ -554,7 +554,7 @@ class AccountLedgerView(APIView):
 
         response = []
         for account in accounts:
-            sales = Sale.objects.filter(account=account)
+            sales = InterCitySale.objects.filter(account=account)
             expenses = _branch_expenses_qs(staff_branch).filter(account_id=account.id)
             transport_expenses = TransportExpense.objects.filter(account=account)
             incoming = FundsTransfer.objects.filter(to_account=account)
