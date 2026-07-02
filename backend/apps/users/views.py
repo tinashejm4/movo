@@ -1,11 +1,23 @@
 import datetime
 import secrets
 from django.utils import timezone
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from apps.users.permissions import IsStaff
+from apps.users.serializers import (
+	ErrorResponseSerializer,
+	CustomerRegisterLoginRequestSerializer,
+	OTPCreateRequestSerializer,
+	OTPCreateResponseSerializer,
+	StaffLoginRequestSerializer,
+	StaffProfileResponseSerializer,
+	TokenPairResponseSerializer,
+	TokenRefreshRequestSerializer,
+	TokenRefreshResponseSerializer,
+)
 from .models import OTP, Contact, Customer, Staff
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.settings import api_settings
@@ -21,6 +33,13 @@ CUSTOMER_DEFAULT_PASSWORD = "Pass@123"
 class StaffProfileView(APIView):
 	permission_classes = [IsAuthenticated, IsStaff]
 
+	@extend_schema(
+		tags=["Users"],
+		responses={
+			200: StaffProfileResponseSerializer,
+			404: OpenApiResponse(ErrorResponseSerializer, description="Staff profile not found"),
+		},
+	)
 	def get(self, request):
 		try:
 			staff = Staff.objects.select_related("branch").get(user=request.user)
@@ -37,7 +56,17 @@ class StaffProfileView(APIView):
 		)
 	
 class StaffLoginView(APIView):
+	authentication_classes = []
 
+	@extend_schema(
+		tags=["Users"],
+		request=StaffLoginRequestSerializer,
+		responses={
+			200: TokenPairResponseSerializer,
+			401: OpenApiResponse(ErrorResponseSerializer, description="Invalid credentials"),
+			403: OpenApiResponse(ErrorResponseSerializer, description="Inactive user"),
+		},
+	)
 	def post(self, request):
 		data = request.data
 		username = data.get("username")
@@ -62,7 +91,18 @@ class StaffLoginView(APIView):
 
 class TokenRefreshView(SimpleJWTTokenRefreshView):
 	"""Refresh access tokens using a valid refresh token."""
+	authentication_classes = []
 
+	@extend_schema(
+		tags=["Users"],
+		request=TokenRefreshRequestSerializer,
+		responses={
+			200: TokenRefreshResponseSerializer,
+			400: OpenApiResponse(ErrorResponseSerializer, description="Missing or invalid refresh token"),
+			401: OpenApiResponse(ErrorResponseSerializer, description="User not found for this token"),
+			403: OpenApiResponse(ErrorResponseSerializer, description="Inactive user"),
+		},
+	)
 	def post(self, request, *args, **kwargs):
 		refresh_token = request.data.get("refresh")
 		if not refresh_token:
@@ -93,7 +133,16 @@ class TokenRefreshView(SimpleJWTTokenRefreshView):
 		return super().post(request, *args, **kwargs)
 
 class OTPCreateView(APIView):
+	authentication_classes = []
 
+	@extend_schema(
+		tags=["Users"],
+		request=OTPCreateRequestSerializer,
+		responses={
+			201: OTPCreateResponseSerializer,
+			400: OpenApiResponse(ErrorResponseSerializer, description="Phone number is required"),
+		},
+	)
 	def post(self, request):
 		data = request.data
 		username = data.get("phone_number")
@@ -115,7 +164,16 @@ class OTPCreateView(APIView):
 		return Response({"otp": otp_code}, status=status.HTTP_201_CREATED)
 
 class CustomerRegisterLoginView(APIView):
+	authentication_classes = []
 
+	@extend_schema(
+		tags=["Users"],
+		request=CustomerRegisterLoginRequestSerializer,
+		responses={
+			200: TokenPairResponseSerializer,
+			400: OpenApiResponse(ErrorResponseSerializer, description="Missing, invalid, or expired OTP"),
+		},
+	)
 	def post(self, request):
 		# Customer registration/login will be done through phone and an OTP will be sent to the phone 
 		# number for verification. the otp will be sent together with the phone number and the name of the customer. 
