@@ -8,3 +8,7 @@ __pycache__/
 db.sqlite3
 *.log
 *.pot
+
+.codex
+.agents
+.venv

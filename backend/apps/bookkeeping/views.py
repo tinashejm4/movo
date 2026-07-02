@@ -2,12 +2,12 @@ import datetime
 from django.core.exceptions import FieldError
 from django.db.models import Q, Sum
 from rest_framework.permissions import IsAuthenticated
-from users.permissions import IsStaff
-from users.models import Staff
+from apps.users.permissions import IsStaff
+from apps.users.models import Staff
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from intercity.models import Batch
+from apps.intercity.models import Batch
 from .models import InterCitySale, Account, Charge, EndOfDayBalance, Expense, ExpenseType, FundsTransfer,  TransportExpense
 
 

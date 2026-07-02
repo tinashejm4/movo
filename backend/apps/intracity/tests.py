@@ -2,9 +2,9 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
-from bookkeeping.models import Account, Sale
+from apps.bookkeeping.models import Account, Sale
 
-from users.models import Biker, City, Contact, Customer
+from apps.users.models import Biker, City, Contact, Customer
 
 from .models import Invoice, Package, PackageStatus
 

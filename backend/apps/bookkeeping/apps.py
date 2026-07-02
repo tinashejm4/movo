@@ -1,6 +1,7 @@
 from django.apps import AppConfig
 
 
-class IntercityConfig(AppConfig):
+class BookkeepingConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'intercity'
+    name = 'apps.bookkeeping'
+    label = 'bookkeeping'

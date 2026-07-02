@@ -13,8 +13,8 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from users.models import City, Contact, Customer
-from bookkeeping.models import Account, IntracitySale
+from apps.users.models import City, Contact, Customer
+from apps.bookkeeping.models import Account, IntracitySale
 from .models import Biker, Package, PackageStatus, Invoice
 
 

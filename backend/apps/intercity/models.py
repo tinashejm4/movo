@@ -2,7 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 import random
 import string
-from users.models import Branch, Customer, Staff
+from apps.users.models import Branch, Customer, Staff
        
 class PrePackage(models.Model):
     slug = models.SlugField(max_length=250, null = False, blank =False, editable=False)

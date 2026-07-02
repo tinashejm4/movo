@@ -1,7 +1,7 @@
 import secrets
 
 from django.db import models
-from users.models import Customer, City,Biker
+from apps.users.models import Customer, City,Biker
 
 class Package(models.Model):
     slug = models.SlugField(max_length=250, null = False, blank =False, editable=False)

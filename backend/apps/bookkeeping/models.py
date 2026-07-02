@@ -1,7 +1,7 @@
 from django.db import models
-from intercity.models import Package, Batch, Payment
-from intracity.models import Invoice
-from users.models import Branch
+from apps.intercity.models import Package, Batch, Payment
+from apps.intracity.models import Invoice
+from apps.users.models import Branch
 from django.contrib.auth.models import User
 
 class Account(models.Model):

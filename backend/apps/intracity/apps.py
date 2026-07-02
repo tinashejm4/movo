@@ -2,4 +2,5 @@ from django.apps import AppConfig
 
 
 class IntracityConfig(AppConfig):
-    name = 'intracity'
+    name = 'apps.intracity'
+    label = 'intracity'
