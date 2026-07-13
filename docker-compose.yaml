@@ -1,0 +1,36 @@
+
+services:
+  backend:
+    build: ./backend
+    container_name: movo_backend
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DEBUG: "1"
+      DB_NAME: movo_db
+      DB_USER: movo_user
+      DB_PASSWORD: movo_password
+      DB_HOST: db
+      DB_PORT: "5432"
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15
+    container_name: movo_db
+    environment:
+      POSTGRES_USER: movo_user
+      POSTGRES_PASSWORD: movo_password
+      POSTGRES_DB: movo_db
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+
+volumes:
+  postgres_data:

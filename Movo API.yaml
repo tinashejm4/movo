@@ -1,0 +1,441 @@
+openapi: 3.0.3
+info:
+  title: Movo API
+  version: 1.0.0
+  description: API documentation for Movo services.
+paths:
+  /api/bookkeeping/accounts/:
+    get:
+      operationId: bookkeeping_accounts_retrieve
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/accounts/close-day/:
+    post:
+      operationId: bookkeeping_accounts_close_day_create
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/accounts/daily-summary/:
+    get:
+      operationId: bookkeeping_accounts_daily_summary_retrieve
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/accounts/ledger/:
+    get:
+      operationId: bookkeeping_accounts_ledger_retrieve
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/available-batches/:
+    get:
+      operationId: bookkeeping_available_batches_retrieve
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/expense-types/:
+    get:
+      operationId: bookkeeping_expense_types_retrieve
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/expenses/:
+    get:
+      operationId: bookkeeping_expenses_retrieve
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: bookkeeping_expenses_create
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/transfers/:
+    get:
+      operationId: bookkeeping_transfers_retrieve
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: bookkeeping_transfers_create
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/bookkeeping/transport-expenses/:
+    post:
+      operationId: bookkeeping_transport_expenses_create
+      tags:
+      - bookkeeping
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/batches/:
+    get:
+      operationId: intercity_batches_retrieve
+      description: Get all batches sent from or to the staff member's branch
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/batches/{batch_id}/:
+    get:
+      operationId: intercity_batches_retrieve_2
+      description: Get batch details and all packages in it
+      parameters:
+      - in: path
+        name: batch_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/check-payment/:
+    get:
+      operationId: intercity_check_payment_retrieve
+      description: Check the status of a PaymentRequest
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/create-package/:
+    get:
+      operationId: intercity_create_package_retrieve
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/create-pre-package/:
+    post:
+      operationId: intercity_create_pre_package_create
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/dispatch-package/:
+    get:
+      operationId: intercity_dispatch_package_retrieve
+      description: |-
+        Search for package by receiver code and retrieve details
+
+        Query params: receiver_code
+        Returns: receiver_name, package_code, sender_phone, receiver_phone, is_pay_forward, amounts, payment method/currency
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: intercity_dispatch_package_create
+      description: |-
+        Mark package as collected/dispatched
+
+        Required fields:
+        - receiver_code: The OTP code printed on the package label
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/receive-package/:
+    get:
+      operationId: intercity_receive_package_retrieve
+      description: |-
+        Step 1: Search for package by code and retrieve details
+
+        Query params: package_code
+        Returns: sender details, receiver details, collection point, date added
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: intercity_receive_package_create
+      description: |-
+        Step 2 & 3: Add dimensions, description, and payment details, then finalize
+
+        Required fields:
+        - package_code: Pre-package creation code
+        - step: "dimensions" for step 2, "payment" for step 3
+
+        Step 2 (dimensions):
+        - length, width, height, weight
+        - description
+
+        Step 3 (payment):
+        - is_pay_forward: boolean
+        - payment_method: "cash" or "ecocash"
+        - currency: "usd" or "zwl"
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intercity/request-payment/:
+    post:
+      operationId: intercity_request_payment_create
+      description: Create a PaymentRequest (simulates requesting mobile money payment)
+      tags:
+      - intercity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/assign-pending-packages/:
+    post:
+      operationId: intracity_assign_pending_packages_create
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/cancel-order/:
+    post:
+      operationId: intracity_cancel_order_create
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/create-package/:
+    get:
+      operationId: intracity_create_package_retrieve
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: intracity_create_package_create
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/dropoff-verify/:
+    post:
+      operationId: intracity_dropoff_verify_create
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/ecocash-payment/:
+    post:
+      operationId: intracity_ecocash_payment_create
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/package/:
+    get:
+      operationId: intracity_package_retrieve
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: intracity_package_create
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/packages/:
+    get:
+      operationId: intracity_packages_retrieve
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/intracity/pickup-verify/:
+    post:
+      operationId: intracity_pickup_verify_create
+      tags:
+      - intracity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/users/otp/:
+    post:
+      operationId: users_otp_create
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/users/refresh/:
+    post:
+      operationId: users_refresh_create
+      description: Refresh access tokens using a valid refresh token.
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/users/register-login/:
+    post:
+      operationId: users_register_login_create
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/users/staff/login/:
+    post:
+      operationId: users_staff_login_create
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/users/staff/profile/:
+    get:
+      operationId: users_staff_profile_retrieve
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+components:
+  schemas:
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+          writeOnly: true
+      required:
+      - access
+      - refresh
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
