@@ -206,3 +206,14 @@ ECOCASH_MERCHANT_NAME = os.environ.get("ECOCASH_MERCHANT_NAME", "Test Merchant")
 ECOCASH_NOTIFY_URL = os.environ.get(
     "ECOCASH_NOTIFY_URL", "https://myapp.example.com/webhook/eip"
 )
+
+
+TXTCONSOLE_SEND_OTP = os.environ.get("TXTCONSOLE_SEND_OTP", "0") == "1"
+TXTCONSOLE_BASE_URL = os.environ.get("TXTCONSOLE_BASE_URL", "https://api.txtconsole.com/v1")
+TXTCONSOLE_SMS_URL = os.environ.get("TXTCONSOLE_SMS_URL")
+TXTCONSOLE_SYSTEM_ID = os.environ.get("TXTCONSOLE_SYSTEM_ID")
+TXTCONSOLE_PASSWORD = os.environ.get("TXTCONSOLE_PASSWORD")
+TXTCONSOLE_SOURCE = os.environ.get("TXTCONSOLE_SOURCE")
+TXTCONSOLE_RECEIPT_URL = os.environ.get("TXTCONSOLE_RECEIPT_URL")
+TXTCONSOLE_SOURCE = os.environ.get("TXTCONSOLE_SOURCE", "MOVO")
+TXTCONSOLE_AUTH_HEADER = os.environ.get("TXTCONSOLE_AUTH_HEADER")

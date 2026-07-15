@@ -1,6 +1,9 @@
 import datetime
 import secrets
+import requests, base64
+import logging
 from django.utils import timezone
+from django.conf import settings
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -28,6 +31,9 @@ from rest_framework_simplejwt.views import TokenRefreshView as SimpleJWTTokenRef
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from apps.users.utils import normalize_zimbabwean_number
+
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -158,13 +164,62 @@ class OTPCreateView(APIView):
 		otp_code = f"{secrets.randbelow(1_000_000):06d}"
 
 		# Create or update the OTP for the given username
-		otp, created = OTP.objects.update_or_create(
+		otp, _created = OTP.objects.update_or_create(
 			username=username,
 			defaults={"otp_code": otp_code},
 		)
 
-		#Send the OTP to the user's phone number using your preferred method (e.g., SMS gateway, email, etc.)
-		print(f"Sending OTP {otp_code} to phone number {username}")  # Replace this with actual sending logic
+		if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
+			return Response(
+				{"error": "SMS provider credentials are missing"},
+				status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+			)
+		
+		headers = {
+			"accept": "application/json",
+			"content-type": "application/json",
+			"authorization": "Basic " + base64.b64encode(f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()).decode(),
+		}
+
+		payload = {
+			"destination": f"263{username}",
+			"text": f"Your Movo OTP is {otp_code}. It expires in 5 minutes.",
+			"source": settings.TXTCONSOLE_SOURCE,
+		}
+
+		if settings.TXTCONSOLE_RECEIPT_URL:
+			payload["receiptURL"] = settings.TXTCONSOLE_RECEIPT_URL
+
+		try:
+			provider_response = requests.post(
+				settings.TXTCONSOLE_SMS_URL+"/sms",
+				json=payload,
+				headers=headers,
+				timeout=20,
+			)
+
+			if provider_response.status_code >= 400:
+				try:
+					error_details = provider_response.json()
+				except ValueError:
+					error_details = {"message": provider_response.text}
+				logger.warning(
+					"txtConsole OTP send failed for %s: %s",
+					username,
+					error_details,
+				)
+				return Response(
+					{"error": "Failed to send OTP SMS"},
+					status=status.HTTP_502_BAD_GATEWAY,
+				)
+		except requests.RequestException as exc:
+			logger.exception("txtConsole OTP send exception for %s", username)
+			return Response(
+				{"error": "SMS provider request failed"},
+				status=status.HTTP_502_BAD_GATEWAY,
+			)
+
+		logger.info("Generated OTP for %s", username)
 		return Response({"otp": otp_code}, status=status.HTTP_201_CREATED)
 
 class CustomerRegisterLoginView(APIView):

@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.bookkeeping.models import Account, IntracitySale
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from ..serializers import (
+from ..serializers.payment_serializer import (
     EcocashPaymentProcessedResponseSerializer,
     EcocashPaymentRequestSerializer,
     EcocashPaymentResponseSerializer,
@@ -23,6 +23,15 @@ from ..serializers import (
 
 class PaymentViewSet(ViewSet):
     # permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _normalize_basic_auth_header(raw_header: str) -> str:
+        if not raw_header:
+            return ""
+        header = str(raw_header).strip()
+        if header.lower().startswith("basic "):
+            return f"Basic {header[6:].strip()}"
+        return f"Basic {header}"
 
     @extend_schema(
         tags=["intracity/Payments"],
@@ -67,7 +76,10 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not settings.ECOCASH_AUTH_HEADER:
+        raw_auth_header = settings.ECOCASH_AUTH_HEADER
+        if not raw_auth_header and not (
+            settings.ECOCASH_CLIENT_ID and settings.ECOCASH_SECRET
+        ):
             return Response(
                 {"error": "EcoCash configuration is missing"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -116,13 +128,14 @@ class PaymentViewSet(ViewSet):
             "notifyUrl": settings.ECOCASH_NOTIFY_URL,
         }
 
-        token = base64.b64encode(
-            f"{settings.ECOCASH_CLIENT_ID}:{settings.ECOCASH_SECRET}".encode()
-        ).decode()
+        if not raw_auth_header:
+            raw_auth_header = base64.b64encode(
+                f"{settings.ECOCASH_CLIENT_ID}:{settings.ECOCASH_SECRET}".encode()
+            ).decode()
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Basic {token}",
+            "Authorization": self._normalize_basic_auth_header(raw_auth_header),
         }
 
         provider_response = None

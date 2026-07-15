@@ -17,10 +17,3 @@ class InvoiceAmountResponseSerializer(serializers.Serializer):
     invoice_amount_zig = serializers.DecimalField(
         max_digits=20, decimal_places=2, allow_null=True
     )
-
-class InvoiceQuoteResponseSerializer(serializers.Serializer):
-    city_id = serializers.IntegerField()
-    city_name = serializers.CharField()
-    distance_km = serializers.FloatField()
-    is_fast_delivery = serializers.BooleanField()
-    amount = serializers.FloatField()

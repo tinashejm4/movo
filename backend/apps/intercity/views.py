@@ -33,6 +33,15 @@ def normalize_ecocash_phone(phone: str) -> str:
     return phone
 
 
+def normalize_ecocash_auth_header(raw_header: str) -> str:
+    if not raw_header:
+        return ''
+    header = str(raw_header).strip()
+    if header.lower().startswith('basic '):
+        return f"Basic {header[6:].strip()}"
+    return f"Basic {header}"
+
+
 class PrePackageView(APIView):
     # permission_classes = [IsAuthenticated]
 
@@ -469,7 +478,7 @@ class RequestPaymentView(APIView):
 
             headers = {
                 'Content-Type': 'application/json',
-                'Authorization': f"Basic {auth_header}",
+                'Authorization': normalize_ecocash_auth_header(auth_header),
             }
 
             print("[EcoCash Request]")
@@ -547,7 +556,7 @@ class CheckPaymentStatusView(APIView):
             normalized_phone = normalize_ecocash_phone(pr.phone_number)
             status_url = f"{ecocash_base}/payment/v1/{normalized_phone}/transactions/amount/{pr.external_id}"
             headers = {
-                'Authorization': auth_header,
+                'Authorization': normalize_ecocash_auth_header(auth_header),
             }
 
             try:
