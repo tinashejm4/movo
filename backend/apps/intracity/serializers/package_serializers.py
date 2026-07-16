@@ -83,3 +83,9 @@ class PackagePriceResponseSerializer(serializers.Serializer):
     is_fast_delivery = serializers.BooleanField()
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
 
+class SuburbSearchQuerySerializer(serializers.Serializer):
+    query = serializers.CharField(required=True)
+    city = serializers.CharField(required=False)
+
+class SuburbSearchResponseSerializer(serializers.Serializer):
+    surburb_id = serializers.CharField()

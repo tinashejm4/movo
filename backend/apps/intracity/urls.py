@@ -8,14 +8,15 @@ from .views.payments_views import PaymentViewSet
 package_create = PackageViewSet.as_view({"post": "create_package"})
 package_detail = PackageViewSet.as_view({"get": "package_detail"})
 package_list = PackageViewSet.as_view({"get": "list_packages"})
+search_suburb = PackageViewSet.as_view({"get": "search_suburb"})
+
 assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packages"})
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
 dropoff_verify = DeliveryViewSet.as_view({"post": "dropoff_verify"})
 cancel_order = DeliveryViewSet.as_view({"post": "cancel_order"})
-get_suburbs = DeliveryViewSet.as_view({"get": "get_suburbs"})
-invoice_amount = InvoiceViewSet.as_view({"get": "amount", "post": "quote"})
+invoice_amount = InvoiceViewSet.as_view({"get": "amount"})
 ecocash_payment = PaymentViewSet.as_view({"post": "ecocash_payment"})
-package_price = PaymentViewSet.as_view({"get": "calculate_package_price"})
+package_price = PackageViewSet.as_view({"get": "calculate_price"})
 
 urlpatterns = [
     path("create-package/", 
@@ -55,8 +56,8 @@ urlpatterns = [
          name="intracity_cancel_order"
          ),
     path("get-suburbs/", 
-         get_suburbs, 
-         name="intracity_get_suburbs"
+         search_suburb, 
+         name="intracity_search_suburb"
          ),
     path(
         "ecocash-payment/",

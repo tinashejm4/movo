@@ -138,10 +138,6 @@ class PaymentViewSet(ViewSet):
             "Authorization": self._normalize_basic_auth_header(raw_auth_header),
         }
 
-        provider_response = None
-        print(headers)
-        print(settings.ECOCASH_PAYMENT_URL)
-        print()
         req = Request(
             settings.ECOCASH_PAYMENT_URL,
             data=json.dumps(payload).encode("utf-8"),

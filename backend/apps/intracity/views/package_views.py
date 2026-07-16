@@ -16,7 +16,9 @@ from ..serializers.package_serializers import (
     PackageListSerializer,
     PackageCreateSerializer,
     PackagePriceRequestSerializer,
-    PackagePriceResponseSerializer
+    PackagePriceResponseSerializer,
+    SuburbSearchQuerySerializer,
+    SuburbSearchResponseSerializer,
 )
 from ..models import Package, PackageStatus, Invoice, Price
 from drf_spectacular.utils import OpenApiResponse, extend_schema
@@ -361,4 +363,45 @@ class PackageViewSet(ViewSet):
             serializer.data,
             status=status.HTTP_200_OK,
         )
+    
+
+    @extend_schema(
+        tags=["intracity/Delivery"],
+        request=SuburbSearchQuerySerializer,
+        responses={
+            200: SuburbSearchResponseSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="Incorrect request parameters"
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="User cannot get this suburb",
+            ),
+        },
+    )
+
+    def search_suburb(self, request):
+        query = request.query_params.get("query", "").strip()
+        city = request.query_params.get("city", "").strip()
+        if not query:
+            return Response(
+                {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        normalized_query = query.lower()
+        suburbs_qs = Suburb.objects.filter(
+            Q(name__icontains=query),
+            Q(city__name__icontains=city) if city else Q(),
+        ).values_list("name", flat=True).distinct()
+        suburbs = list(suburbs_qs)
+
+        SuburbSearchLog.objects.create(
+            query=query,
+            normalized_query=normalized_query,
+            result_count=len(suburbs),
+            had_results=bool(suburbs),
+            user=request.user if request.user.is_authenticated else None,
+        )
+
+        return Response({"suburbs": list(suburbs)}, status=status.HTTP_200_OK)
+
 
