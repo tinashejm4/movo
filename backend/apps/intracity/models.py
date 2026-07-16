@@ -1,6 +1,7 @@
 import secrets
 
 from django.db import models
+from django.contrib.auth.models import User
 from apps.users.models import Customer, City,Biker, Suburb
 from apps.bookkeeping.models import ExchangeRate
 
@@ -76,3 +77,18 @@ class Price(models.Model):
     
     def __str__(self):
         return f'Price for {self.city.name} - Base: {self.base_price}, Rate per KM: {self.rate_per_km}, Fast Delivery Multiplier: {self.fast_delivery_multiplier}'
+
+
+class SuburbSearchLog(models.Model):
+    query = models.CharField(max_length=150)
+    normalized_query = models.CharField(max_length=150)
+    result_count = models.PositiveIntegerField(default=0)
+    had_results = models.BooleanField(default=False)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.query} ({self.result_count})"

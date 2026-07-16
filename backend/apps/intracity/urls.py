@@ -12,6 +12,7 @@ assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packa
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
 dropoff_verify = DeliveryViewSet.as_view({"post": "dropoff_verify"})
 cancel_order = DeliveryViewSet.as_view({"post": "cancel_order"})
+get_suburbs = DeliveryViewSet.as_view({"get": "get_suburbs"})
 invoice_amount = InvoiceViewSet.as_view({"get": "amount", "post": "quote"})
 ecocash_payment = PaymentViewSet.as_view({"post": "ecocash_payment"})
 package_price = PaymentViewSet.as_view({"get": "calculate_package_price"})
@@ -52,6 +53,10 @@ urlpatterns = [
     path("cancel-order/", 
          cancel_order, 
          name="intracity_cancel_order"
+         ),
+    path("get-suburbs/", 
+         get_suburbs, 
+         name="intracity_get_suburbs"
          ),
     path(
         "ecocash-payment/",

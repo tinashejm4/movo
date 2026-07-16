@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Subquery, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -7,8 +7,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.bookkeeping.models import Account, IntracitySale
+from apps.users.models import City, Suburb
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from ..models import Biker, Package, PackageStatus, Invoice
+from ..models import Biker, Package, PackageStatus, Invoice, SuburbSearchLog
 
 from ..serializers.invoice_serializer import (
     InvoiceAmountQuerySerializer,
@@ -341,6 +342,31 @@ class DeliveryViewSet(ViewSet):
             ),
         },
     )
+
+    def search_suburb(self, request):
+        query = request.query_params.get("query", "").strip()
+        city = request.query_params.get("city", "").strip()
+        if not query:
+            return Response(
+                {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        normalized_query = query.lower()
+        suburbs_qs = Suburb.objects.filter(
+            Q(name__icontains=query),
+            Q(city__name__icontains=city) if city else Q(),
+        ).values_list("name", flat=True).distinct()
+        suburbs = list(suburbs_qs)
+
+        SuburbSearchLog.objects.create(
+            query=query,
+            normalized_query=normalized_query,
+            result_count=len(suburbs),
+            had_results=bool(suburbs),
+            user=request.user if request.user.is_authenticated else None,
+        )
+
+        return Response({"suburbs": list(suburbs)}, status=status.HTTP_200_OK)
+
     @transaction.atomic
     def cancel_order(self, request):
         serializer = CancelOrderRequestSerializer(data=request.data)

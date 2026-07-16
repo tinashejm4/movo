@@ -154,7 +154,7 @@ class PackageViewSet(ViewSet):
         amount = data.get("amount")
         is_fast_delivery = bool(data.get("is_fast_delivery", False))
         is_pay_forward = bool(data.get("is_pay_forward", False))
-        initiated_by = (data.get("initiated_by") or "sender").strip().lower()
+        is_sender_initiated = bool(data.get("is_sender_initiated", True))
 
         required_fields = {
             "phone": counterpart_phone,
@@ -171,17 +171,12 @@ class PackageViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if initiated_by not in {"sender", "receiver"}:
-            return Response(
-                {"error": "initiated_by must be either 'sender' or 'receiver'"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         invoice_amount = amount
         counterpart = self.resolve_customer(counterpart_phone, counterpart_name)
         city = City.objects.first()  # Assuming a single city for now; adjust as needed
 
-        if initiated_by == "sender":
+        if is_sender_initiated:
             sender = Customer.objects.get(user=request.user)
             receiver = counterpart
         else:
@@ -191,7 +186,7 @@ class PackageViewSet(ViewSet):
         package = Package.objects.create(
             sender=sender,
             receiver=receiver,
-            is_sender_initiated=initiated_by == "sender",
+            is_sender_initiated=is_sender_initiated,
             city=city,
             is_fast_delivery=is_fast_delivery,
             pickup_area_id=pickup_area_id,
