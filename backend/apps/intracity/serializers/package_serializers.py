@@ -56,23 +56,20 @@ class PackageDetailSerializer(serializers.Serializer):
         max_digits=20, decimal_places=2, allow_null=True
     )
 
-
 class PackageCreateSerializer(serializers.Serializer):
     phone = serializers.CharField(required=False)
     name = serializers.CharField(required=False)
     pickup_location = serializers.CharField(required=False)
     dropoff_location = serializers.CharField(required=False)
-    pickup_area_id = serializers.IntegerField(required = True),
-    dropoff_area_id = serializers.IntegerField(required = True),
+    pickup_area_id = serializers.IntegerField(required=True)
+    dropoff_area_id = serializers.IntegerField(required=True)
     comments = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     amount = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, allow_null=True
     )
     is_fast_delivery = serializers.BooleanField(required=False, default=False)
     is_pay_forward = serializers.BooleanField(required=False, default=False)
-    initiated_by = serializers.ChoiceField(
-        choices=["sender", "receiver"], required=False, default="sender"
-    )
+    is_sender_initiated = serializers.BooleanField(required=False, default=True)
 
 class PackagePriceRequestSerializer(serializers.Serializer):
     city_id = serializers.IntegerField(required=True)
