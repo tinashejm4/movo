@@ -31,7 +31,7 @@ from rest_framework_simplejwt.views import TokenRefreshView as SimpleJWTTokenRef
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from apps.users.utils import normalize_zimbabwean_number
-
+from .utils import is_valid_zimbabwean_number
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,6 @@ class StaffLoginView(APIView):
 			"username": user.username,
 		})
 
-
 class TokenRefreshView(SimpleJWTTokenRefreshView):
 	"""Refresh access tokens using a valid refresh token."""
 	authentication_classes = []
@@ -160,12 +159,15 @@ class OTPCreateView(APIView):
 		if not username:
 			return Response({"error": "Phone number is required"}, status=status.HTTP_400_BAD_REQUEST)
 
+		if not is_valid_zimbabwean_number(username):
+			return Response({"error": "Invalid Zimbabwean phone number"}, status=status.HTTP_400_BAD_REQUEST)
+
 		# Generate a 6-digit OTP.
 		otp_code = f"{secrets.randbelow(1_000_000):06d}"
 
 		# Create or update the OTP for the given username
 		otp, _created = OTP.objects.update_or_create(
-			username=username,
+			username=normalize_zimbabwean_number(username),
 			defaults={"otp_code": otp_code},
 		)
 
@@ -182,7 +184,7 @@ class OTPCreateView(APIView):
 		}
 
 		payload = {
-			"destination": f"263{username}",
+			"destination": f"263{normalize_zimbabwean_number(username)}",
 			"text": f"Your Movo OTP is {otp_code}. It expires in 5 minutes.",
 			"source": settings.TXTCONSOLE_SOURCE,
 		}

@@ -1,3 +1,4 @@
+import math
 import random
 import string
 from django.contrib.auth.models import User
@@ -9,6 +10,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import City, Contact, Customer, Suburb
+from apps.bookkeeping.models import ExchangeRate
 from ..serializers.package_serializers import (
     ErrorResponseSerializer,
     PackageDetailQuerySerializer,
@@ -20,8 +22,9 @@ from ..serializers.package_serializers import (
     SuburbSearchQuerySerializer,
     SuburbSearchResponseSerializer,
 )
-from ..models import Package, PackageStatus, Invoice, Price
+from ..models import Package, PackageStatus, Invoice, Price, SuburbSearchLog
 from drf_spectacular.utils import OpenApiResponse, extend_schema
+from apps.users.utils import normalize_zimbabwean_number
 
 
 class PackageViewSet(ViewSet):
@@ -184,6 +187,9 @@ class PackageViewSet(ViewSet):
         else:
             sender = counterpart
             receiver = Customer.objects.get(user=request.user)
+        
+        pickup_area = get_object_or_404(Suburb, id=pickup_area_id)
+        dropoff_area = get_object_or_404(Suburb, id=dropoff_area_id)
 
         package = Package.objects.create(
             sender=sender,
@@ -191,9 +197,9 @@ class PackageViewSet(ViewSet):
             is_sender_initiated=is_sender_initiated,
             city=city,
             is_fast_delivery=is_fast_delivery,
-            pickup_area_id=pickup_area_id,
+            pickup_area=pickup_area,
             pickup_address=pickup_address,
-            dropoff_area_id=dropoff_area_id,
+            dropoff_area=dropoff_area,
             dropoff_address=dropoff_address,
             receiver_code=self.generate_code(),
             sender_code=self.generate_code(),
@@ -206,6 +212,7 @@ class PackageViewSet(ViewSet):
             amount=invoice_amount,
             is_pay_forward=is_pay_forward,
             is_paid=False,
+            exchange_rate = ExchangeRate.objects.last()
         )
 
         return Response(
@@ -215,6 +222,7 @@ class PackageViewSet(ViewSet):
 
     def resolve_customer(self, phone_number, full_name=None):
         customer_default_password = "Pass@123"
+        phone_number = normalize_zimbabwean_number(phone_number)
 
         if User.objects.filter(username=phone_number).exists():
             user = User.objects.get(username=phone_number)
@@ -255,27 +263,27 @@ class PackageViewSet(ViewSet):
                 "receiver_name": f"{package.receiver.user.first_name} {package.receiver.user.last_name}".strip(),
                 "sender_id": package.sender.id,
                 "sender_name": f"{package.sender.user.first_name} {package.sender.user.last_name}".strip(),
-                "pickup_location": package.pickup_location,
-                "dropoff_location": package.dropoff_location,
-                "status": PackageStatus.objects.filter(package=package)
-                .order_by("-updated_at")
-                .first()
-                .status,
+                "pickup_address": package.pickup_address,
+                "pickup_area": package.pickup_area,
+                "dropoff_address": package.dropoff_address,
+                "dropoff_area": package.dropoff_area,
+                "status": PackageStatus.objects.filter(package=package).order_by("-updated_at").first().status,
                 "city": package.city.name,
-                "driver_id": package.biker.id if package.biker else None,
                 "driver_name": (
                     f"{package.biker.user.first_name} {package.biker.user.last_name}".strip()
                     if package.biker
                     else None
                 ),
                 "receiver_code": package.receiver_code,
+                "sender_code": package.sender_code,
                 "comments": package.comments,
                 "is_sender_initiated": package.is_sender_initiated,
+                "driver_id": package.biker.id if package.biker else None,
                 "assigned_at": package.assigned_at,
                 "delivered_at": package.delivered_at,
-                "added_at": package.added_at,
                 "invoice_amount": invoice.amount if invoice else None,
                 "invoice_amount_zig": invoice.amount_in_zig() if invoice else None,
+                "added_at": package.added_at,
             }
         )
         return serializer.data
@@ -296,7 +304,6 @@ class PackageViewSet(ViewSet):
         serializer = PackagePriceRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=False)
         data = serializer.initial_data
-
 
         from_suburb_id = data.get("from_suburb_id")
         to_suburb_id = data.get("to_suburb_id")
@@ -350,13 +357,19 @@ class PackageViewSet(ViewSet):
         amount = float(price.base_price) + (float(price.rate_per_km) * distance_km)
         if is_fast_delivery:
             amount *= float(price.fast_delivery_multiplier)
+        
+        decimal_part = amount - math.floor(amount)
+        if decimal_part > 0.40:
+            amount = math.ceil(amount)   # round up
+        else:
+            amount = math.floor(amount)
 
         serializer = PackagePriceResponseSerializer(
             {
                 "city_id": city.id,
                 "distance_km": distance_km,
                 "is_fast_delivery": is_fast_delivery,
-                "amount": round(amount, 2),
+                "amount": amount,
             }
         )
         return Response(
@@ -381,8 +394,9 @@ class PackageViewSet(ViewSet):
     )
 
     def search_suburb(self, request):
-        query = request.query_params.get("query", "").strip()
-        city = request.query_params.get("city", "").strip()
+        data = request.data
+        query = data.get("query", "").strip()
+        city_id = data.get("city")
         if not query:
             return Response(
                 {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
@@ -390,7 +404,7 @@ class PackageViewSet(ViewSet):
         normalized_query = query.lower()
         suburbs_qs = Suburb.objects.filter(
             Q(name__icontains=query),
-            Q(city__name__icontains=city) if city else Q(),
+            Q(city__id=city_id) if city_id else Q(),
         ).values_list("name", flat=True).distinct()
         suburbs = list(suburbs_qs)
 
