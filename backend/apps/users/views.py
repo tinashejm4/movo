@@ -253,7 +253,6 @@ class OTPCreateView(APIView):
 				status=status.HTTP_502_BAD_GATEWAY,
 			)
 
-		logger.info("Generated OTP for %s", username)
 		return Response({"otp": otp_code}, status=status.HTTP_201_CREATED)
 
 class CustomerRegisterLoginView(APIView):
