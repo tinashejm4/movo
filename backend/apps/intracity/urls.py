@@ -8,7 +8,7 @@ from .views.payments_views import PaymentViewSet
 package_create = PackageViewSet.as_view({"post": "create_package"})
 package_detail = PackageViewSet.as_view({"get": "package_detail"})
 package_list = PackageViewSet.as_view({"get": "list_packages"})
-search_suburb = PackageViewSet.as_view({"get": "search_suburb"})
+search_suburb = PackageViewSet.as_view({"post": "search_suburb"})
 
 assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packages"})
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
@@ -55,7 +55,7 @@ urlpatterns = [
          cancel_order, 
          name="intracity_cancel_order"
          ),
-    path("get-suburbs/", 
+    path("search-suburbs/", 
          search_suburb, 
          name="intracity_search_suburb"
          ),

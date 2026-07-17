@@ -1,6 +1,5 @@
 from rest_framework import serializers
 
-
 class InvoiceErrorResponseSerializer(serializers.Serializer):
     error = serializers.CharField()
 

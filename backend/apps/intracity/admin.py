@@ -1,8 +1,11 @@
 from django.contrib import admin
-from .models import SuburbSearchLog
+from .models import SuburbSearchLog, Package, PackageStatus, Invoice,Price
 
 # Register your models here.
-
+admin.site.register(Package)
+admin.site.register(PackageStatus)
+admin.site.register(Invoice)
+admin.site.register(Price)
 
 @admin.register(SuburbSearchLog)
 class SuburbSearchLogAdmin(admin.ModelAdmin):
