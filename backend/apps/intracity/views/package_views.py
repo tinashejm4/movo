@@ -26,12 +26,16 @@ from ..models import Package, PackageStatus, Invoice, Price, SuburbSearchLog
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from apps.users.utils import normalize_zimbabwean_number
 
+# TODO list, $id
+
 
 class PackageViewSet(ViewSet):
     ACTIVE_PACKAGE_STATUSES = {"Pending", "In Transit"}
 
     def get_permissions(self):
-        if self.action == "create_package":
+        if self.action in {"create_package", "list_packages", "package_detail"}:
+            return [IsAuthenticated()]
+        if self.action in {"calculate_price", "search_suburb"}:
             return [AllowAny()]
         return [IsAuthenticated()]
 
@@ -146,6 +150,12 @@ class PackageViewSet(ViewSet):
     )
     @transaction.atomic
     def create_package(self, request):
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "Authentication credentials were not provided."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
         serializer = PackageCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=False)
         data = serializer.initial_data
@@ -175,7 +185,6 @@ class PackageViewSet(ViewSet):
                 {"error": f"Missing required fields: {', '.join(missing_fields)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
 
         invoice_amount = amount
         counterpart = self.resolve_customer(counterpart_phone, counterpart_name)
@@ -287,7 +296,7 @@ class PackageViewSet(ViewSet):
             }
         )
         return serializer.data
-    
+
     @extend_schema(
         tags=["intracity/Packages"],
         request=PackagePriceRequestSerializer,
@@ -298,7 +307,6 @@ class PackageViewSet(ViewSet):
             ),
         },
     )
-
     @transaction.atomic
     def calculate_price(self, request):
         serializer = PackagePriceRequestSerializer(data=request.data)
@@ -320,7 +328,6 @@ class PackageViewSet(ViewSet):
             return Response(
                 {"error": "distance_km is required"}, status=status.HTTP_400_BAD_REQUEST
             )
-
 
         if distance_km < 0:
             return Response(
@@ -376,7 +383,6 @@ class PackageViewSet(ViewSet):
             serializer.data,
             status=status.HTTP_200_OK,
         )
-    
 
     @extend_schema(
         tags=["intracity/Delivery"],
@@ -392,7 +398,6 @@ class PackageViewSet(ViewSet):
             ),
         },
     )
-
     def search_suburb(self, request):
         data = request.data
         query = data.get("query", "").strip()
@@ -417,5 +422,3 @@ class PackageViewSet(ViewSet):
         )
 
         return Response({"suburbs": list(suburbs)}, status=status.HTTP_200_OK)
-
-

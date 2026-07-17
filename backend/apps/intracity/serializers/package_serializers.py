@@ -68,9 +68,7 @@ class PackageCreateSerializer(serializers.Serializer):
     )
     is_fast_delivery = serializers.BooleanField(required=False, default=False)
     is_pay_forward = serializers.BooleanField(required=False, default=False)
-    initiated_by = serializers.ChoiceField(
-        choices=["sender", "receiver"], required=False, default="sender"
-    )
+    is_sender_initiated = serializers.BooleanField(required=False, default=False)
 
 class PackagePriceRequestSerializer(serializers.Serializer):
     city_id = serializers.IntegerField(required=True)
