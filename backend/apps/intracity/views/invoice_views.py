@@ -6,8 +6,8 @@ from apps.users.models import City
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Package, Invoice, Price
 from ..serializers.invoice_serializer import (
-    InvoiceAmountQuerySerializer,
-    InvoiceAmountResponseSerializer,
+    InvoiceDetailsQuerySerializer,
+    InvoiceDetailsResponseSerializer,
     InvoiceErrorResponseSerializer,
 )
 
@@ -16,9 +16,9 @@ class InvoiceViewSet(ViewSet):
 
     @extend_schema(
         tags=["intracity/Invoices"],
-        parameters=[InvoiceAmountQuerySerializer],
+        parameters=[InvoiceDetailsQuerySerializer],
         responses={
-            200: InvoiceAmountResponseSerializer,
+            200: InvoiceDetailsResponseSerializer,
             400: OpenApiResponse(
                 InvoiceErrorResponseSerializer,
                 description="Incorrect request parameters",
@@ -30,7 +30,7 @@ class InvoiceViewSet(ViewSet):
         },
     )
 
-    def amount(self, request):
+    def invoice_details(self, request):
         package_id = request.query_params.get("package_id")
         if not package_id:
             return Response(
@@ -42,9 +42,12 @@ class InvoiceViewSet(ViewSet):
                 {"error": "package not found"}, status=status.HTTP_404_NOT_FOUND
             )
         invoice = Invoice.objects.filter(package=package).first()
-        serializer = InvoiceAmountResponseSerializer(
+        serializer = InvoiceDetailsResponseSerializer(
             {
                 "package_id": package.id,
+                "invoice_id": invoice.id if invoice else None,
+                "is_paid": invoice.is_paid if invoice else None,
+                "is_pay_forward": invoice.is_pay_forward if invoice else None,
                 "invoice_amount": invoice.amount if invoice else None,
                 "invoice_amount_zig": invoice.amount_in_zig() if invoice else None,
             }

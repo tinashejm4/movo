@@ -189,25 +189,6 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-ECOCASH_BASE_URL = os.environ.get(
-    "ECOCASH_BASE_URL", "https://developers.ecocash.co.zw/sandbox"
-)
-ECOCASH_PAYMENT_URL = f"{ECOCASH_BASE_URL}/payment/v1/transactions/amount/"
-ECOCASH_AUTH_HEADER = os.environ.get("ECOCASH_AUTH_HEADER")
-ECOCASH_MERCHANT_CODE = os.environ.get("ECOCASH_MERCHANT_CODE", "287164")
-ECOCASH_MERCHANT_PIN = os.environ.get("ECOCASH_MERCHANT_PIN", "1234")
-ECOCASH_MERCHANT_NUMBER = os.environ.get("ECOCASH_MERCHANT_NUMBER", "778503033")
-ECOCASH_TERMINAL_ID = os.environ.get("ECOCASH_TERMINAL_ID", "TERM001")
-ECOCASH_LOCATION = os.environ.get("ECOCASH_LOCATION", "Harare")
-ECOCASH_SUPER_MERCHANT_NAME = os.environ.get(
-    "ECOCASH_SUPER_MERCHANT_NAME", "EcoCash Sandbox"
-)
-ECOCASH_MERCHANT_NAME = os.environ.get("ECOCASH_MERCHANT_NAME", "Test Merchant")
-ECOCASH_NOTIFY_URL = os.environ.get(
-    "ECOCASH_NOTIFY_URL", "https://myapp.example.com/webhook/eip"
-)
-
-
 TXTCONSOLE_SEND_OTP = os.environ.get("TXTCONSOLE_SEND_OTP", "0") == "1"
 TXTCONSOLE_BASE_URL = os.environ.get("TXTCONSOLE_BASE_URL", "https://api.txtconsole.com/v1")
 TXTCONSOLE_SMS_URL = os.environ.get("TXTCONSOLE_SMS_URL")
@@ -217,3 +198,7 @@ TXTCONSOLE_SOURCE = os.environ.get("TXTCONSOLE_SOURCE")
 TXTCONSOLE_RECEIPT_URL = os.environ.get("TXTCONSOLE_RECEIPT_URL")
 TXTCONSOLE_SOURCE = os.environ.get("TXTCONSOLE_SOURCE", "MOVO")
 TXTCONSOLE_AUTH_HEADER = os.environ.get("TXTCONSOLE_AUTH_HEADER")
+
+# Paynow Integration Settings
+PAYNOW_INTEGRATION_ID = os.environ.get("PAYNOW_INTEGRATION_ID")
+PAYNOW_INTEGRATION_KEY = os.environ.get("PAYNOW_INTEGRATION_KEY")

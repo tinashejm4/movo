@@ -14,18 +14,21 @@ assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packa
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
 dropoff_verify = DeliveryViewSet.as_view({"post": "dropoff_verify"})
 cancel_order = DeliveryViewSet.as_view({"post": "cancel_order"})
-invoice_amount = InvoiceViewSet.as_view({"get": "amount"})
-ecocash_payment = PaymentViewSet.as_view({"post": "ecocash_payment"})
+invoice_details = InvoiceViewSet.as_view({"get": "invoice_details"})
 package_price = PackageViewSet.as_view({"get": "calculate_price"})
+
+ecocash_payment = PaymentViewSet.as_view({"post": "ecocash_payment"})
+ecocash_notify = PaymentViewSet.as_view({"post": "ecocash_notify"})
+
 
 urlpatterns = [
     path("create-package/", 
          package_create, 
          name="intracity_create_package"
          ),
-    path("amount/", 
-         invoice_amount, 
-         name="intracity_invoice_amount"
+    path("invoice-details/", 
+         invoice_details, 
+         name="intracity_invoice_details"
          ),
     path("package/", 
          package_detail, 
@@ -63,6 +66,11 @@ urlpatterns = [
         "ecocash-payment/",
         ecocash_payment,
         name="intracity_ecocash_payment",
+    ),
+    path(
+        "ecocash-notify/",
+        ecocash_notify,
+        name="intracity_ecocash_notify",
     ),
     path(
         "package-price/",

@@ -46,6 +46,7 @@ class DropoffVerificationResponseSerializer(serializers.Serializer):
 
 class CancelOrderRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
+    reason = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class CancelOrderResponseSerializer(serializers.Serializer):

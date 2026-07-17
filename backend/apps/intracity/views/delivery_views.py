@@ -11,12 +11,6 @@ from apps.users.models import City, Suburb
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Biker, Package, PackageStatus, Invoice, SuburbSearchLog
 
-from ..serializers.invoice_serializer import (
-    InvoiceAmountQuerySerializer,
-    InvoiceAmountResponseSerializer,
-    InvoiceErrorResponseSerializer,
-)
-
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
     DeliveryErrorResponseSerializer,
@@ -327,12 +321,29 @@ class DeliveryViewSet(ViewSet):
             status=status.HTTP_200_OK,
         )
 
+
+    @extend_schema(
+        tags=["intracity/Delivery"],
+        request=CancelOrderRequestSerializer,
+        responses={
+            200: CancelOrderResponseSerializer,
+            400: OpenApiResponse(
+                DeliveryErrorResponseSerializer,
+                description="Incorrect request parameters",
+            ),
+            403: OpenApiResponse(
+                DeliveryErrorResponseSerializer,
+                description="User is not assigned to this package",
+            ),
+        },
+    )
     @transaction.atomic
     def cancel_order(self, request):
         serializer = CancelOrderRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=False)
         data = serializer.initial_data
         package_id = data.get("package_id")
+        reason = (data.get("reason") or "").strip()
         if not package_id:
             return Response(
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
@@ -360,11 +371,11 @@ class DeliveryViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        PackageStatus.objects.create(package=package, status="Cancelled")
+        PackageStatus.objects.create(package=package, status="Cancelled", comments=reason)
 
         serializer = CancelOrderResponseSerializer(
             {
-                "message": "Order cancelled successfully",
+                "message": f"Order cancelled successfully because: {reason}",
                 "package_id": package.id,
                 "status": "Cancelled",
             }
