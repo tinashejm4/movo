@@ -29,7 +29,7 @@ class Package(models.Model):
     
     def generate_unique_slug(self):
         while True:
-            candidate = f"pkg-{secrets.token_hex(6)}"
+            candidate = f"mov-{secrets.token_hex(6)}"
             if not Package.objects.filter(slug=candidate).exists():
                 return candidate
 

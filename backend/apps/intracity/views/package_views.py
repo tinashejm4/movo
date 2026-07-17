@@ -1,6 +1,8 @@
 import math
 import random
 import string
+from django.conf import settings
+import requests, base64,logging
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import OuterRef, Q, Subquery
@@ -24,7 +26,9 @@ from ..serializers.package_serializers import (
 )
 from ..models import Package, PackageStatus, Invoice, Price, SuburbSearchLog
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from apps.users.utils import normalize_zimbabwean_number
+from apps.users.utils import normalize_zimbabwean_number, is_valid_zimbabwean_number
+
+logger = logging.getLogger(__name__)
 
 
 class PackageViewSet(ViewSet):
@@ -45,6 +49,7 @@ class PackageViewSet(ViewSet):
             ),
         },
     )
+
     def list_packages(self, request):
         latest_status = (
             PackageStatus.objects.filter(package=OuterRef("pk"))
@@ -161,6 +166,8 @@ class PackageViewSet(ViewSet):
         is_pay_forward = bool(data.get("is_pay_forward", False))
         is_sender_initiated = bool(data.get("is_sender_initiated", True))
 
+
+
         required_fields = {
             "phone": counterpart_phone,
             "name": counterpart_name,
@@ -173,6 +180,12 @@ class PackageViewSet(ViewSet):
         if missing_fields:
             return Response(
                 {"error": f"Missing required fields: {', '.join(missing_fields)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        if not is_valid_zimbabwean_number:
+            return Response(
+                {"error": f"Phone number format is incorrect: {counterpart_phone}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -215,10 +228,87 @@ class PackageViewSet(ViewSet):
             exchange_rate = ExchangeRate.objects.last()
         )
 
+        self.send_receiver_sms(counterpart_phone, package, invoice)
+
         return Response(
             self.serialize_package(package, invoice),
             status=status.HTTP_201_CREATED,
         )
+    
+
+    def send_receiver_sms(self, phone_number, package, invoice):
+        if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
+            return Response(
+             {"error": "SMS provider credentials are missing"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        
+        #message to receiver
+        if package.is_sender_initiated:
+            sender = package.sender.user
+            sender_name = sender.first_name + " " + sender.last_name
+            message = f"""
+                        MOVO Courier: You have a package from {sender_name}. Collection OTP: {package.receiver_code}. Tracking No: {package.slug}.
+                    """
+            if invoice.is_pay_forward:
+                message = message + " " +f"Amount Due on Delivery: ${invoice.amount}"
+            else:
+                message =  message + " " +"Please be ready to receive your delivery."
+        else:
+            receiver = package.sender.user
+            receiver_name = receiver.first_name + " " + receiver.last_name
+            message = f"""
+                        MOVO Courier: Your package for {receiver_name} has been booked. Collection OTP: {package.sender_code}. Tracking No: {package.slug}.
+                    """
+            if not invoice.is_pay_forward:
+                message = message + " " +f"Amount Due on Collection: ${invoice.amount}"
+            else:
+                message =  message + " " +"Please prepare the package for collection."
+
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": "Basic " + base64.b64encode(f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()).decode(),
+        }
+
+        payload = {
+            "destination": f"263{normalize_zimbabwean_number(phone_number)}",
+            "text": message,
+            "source": settings.TXTCONSOLE_SOURCE,
+        }
+
+        if settings.TXTCONSOLE_RECEIPT_URL:
+            payload["receiptURL"] = settings.TXTCONSOLE_RECEIPT_URL
+
+        try:
+            provider_response = requests.post(
+                settings.TXTCONSOLE_SMS_URL+"/sms",
+                json=payload,
+                headers=headers,
+                timeout=20,
+            )
+
+            if provider_response.status_code >= 400:
+                try:
+                    error_details = provider_response.json()
+                except ValueError:
+                    error_details = {"message": provider_response.text}
+                    logger.warning(
+                        "txtConsole OTP send failed for package %s: %s",
+                        package.slug,
+                        error_details,
+                    )
+                    return Response(
+                        {"error": "Failed to send OTP SMS"},
+                        status=status.HTTP_502_BAD_GATEWAY,
+                    )
+        except requests.RequestException as exc:
+            logger.exception("txtConsole OTP send exception for package %s", package.slug)
+            return Response(
+                {"error": "SMS provider request failed"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
 
     def resolve_customer(self, phone_number, full_name=None):
         customer_default_password = "Pass@123"

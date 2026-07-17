@@ -62,6 +62,8 @@ class PackageCreateSerializer(serializers.Serializer):
     name = serializers.CharField(required=False)
     pickup_location = serializers.CharField(required=False)
     dropoff_location = serializers.CharField(required=False)
+    pickup_area_id = serializers.IntegerField(required = True),
+    dropoff_area_id = serializers.IntegerField(required = True),
     comments = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     amount = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, allow_null=True
