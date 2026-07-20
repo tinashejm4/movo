@@ -2,7 +2,7 @@ import math
 import random
 import string
 from django.conf import settings
-import requests, base64,logging
+import requests, base64, logging
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import OuterRef, Q, Subquery
@@ -53,7 +53,6 @@ class PackageViewSet(ViewSet):
             ),
         },
     )
-
     def list_packages(self, request):
         latest_status = (
             PackageStatus.objects.filter(package=OuterRef("pk"))
@@ -87,15 +86,13 @@ class PackageViewSet(ViewSet):
             response_data.append(
                 {
                     "package_id": package.id,
+                    "slug": package.slug,
                     "role": role,
-                    "status": (
-                        "active"
-                        if package_status in self.ACTIVE_PACKAGE_STATUSES
-                        else "inactive"
-                    ),
+                    "status": package_status,
+                    "is_active": package_status in self.ACTIVE_PACKAGE_STATUSES,
                     "city": package.city.name,
-                    "pickup_location": package.pickup_location,
-                    "dropoff_location": package.dropoff_location,
+                    "pickup_location": package.pickup_address,
+                    "dropoff_location": package.dropoff_address,
                     "is_fast_delivery": package.is_fast_delivery,
                     "sender_name": f"{package.sender.user.first_name} {package.sender.user.last_name}".strip(),
                     "receiver_name": f"{package.receiver.user.first_name} {package.receiver.user.last_name}".strip(),
@@ -176,8 +173,6 @@ class PackageViewSet(ViewSet):
         is_pay_forward = bool(data.get("is_pay_forward", False))
         is_sender_initiated = bool(data.get("is_sender_initiated", True))
 
-
-
         required_fields = {
             "phone": counterpart_phone,
             "name": counterpart_name,
@@ -192,7 +187,7 @@ class PackageViewSet(ViewSet):
                 {"error": f"Missing required fields: {', '.join(missing_fields)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         if not is_valid_zimbabwean_number:
             return Response(
                 {"error": f"Phone number format is incorrect: {counterpart_phone}"},
@@ -209,7 +204,7 @@ class PackageViewSet(ViewSet):
         else:
             sender = counterpart
             receiver = Customer.objects.get(user=request.user)
-        
+
         pickup_area = get_object_or_404(Suburb, id=pickup_area_id)
         dropoff_area = get_object_or_404(Suburb, id=dropoff_area_id)
 
@@ -234,7 +229,7 @@ class PackageViewSet(ViewSet):
             amount=invoice_amount,
             is_pay_forward=is_pay_forward,
             is_paid=False,
-            exchange_rate = ExchangeRate.objects.last()
+            exchange_rate=ExchangeRate.objects.last(),
         )
 
         self.send_receiver_sms(counterpart_phone, package, invoice)
@@ -243,16 +238,15 @@ class PackageViewSet(ViewSet):
             self.serialize_package(package, invoice),
             status=status.HTTP_201_CREATED,
         )
-    
 
     def send_receiver_sms(self, phone_number, package, invoice):
         if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
             return Response(
-             {"error": "SMS provider credentials are missing"},
+                {"error": "SMS provider credentials are missing"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        
-        #message to receiver
+
+        # message to receiver
         if package.is_sender_initiated:
             sender = package.sender.user
             sender_name = sender.first_name + " " + sender.last_name
@@ -260,9 +254,9 @@ class PackageViewSet(ViewSet):
                         MOVO Courier: You have a package from {sender_name}. Collection OTP: {package.receiver_code}. Tracking No: {package.slug}.
                     """
             if invoice.is_pay_forward:
-                message = message + " " +f"Amount Due on Delivery: ${invoice.amount}"
+                message = message + " " + f"Amount Due on Delivery: ${invoice.amount}"
             else:
-                message =  message + " " +"Please be ready to receive your delivery."
+                message = message + " " + "Please be ready to receive your delivery."
         else:
             receiver = package.sender.user
             receiver_name = receiver.first_name + " " + receiver.last_name
@@ -270,14 +264,17 @@ class PackageViewSet(ViewSet):
                         MOVO Courier: Your package for {receiver_name} has been booked. Collection OTP: {package.sender_code}. Tracking No: {package.slug}.
                     """
             if not invoice.is_pay_forward:
-                message = message + " " +f"Amount Due on Collection: ${invoice.amount}"
+                message = message + " " + f"Amount Due on Collection: ${invoice.amount}"
             else:
-                message =  message + " " +"Please prepare the package for collection."
+                message = message + " " + "Please prepare the package for collection."
 
         headers = {
             "accept": "application/json",
             "content-type": "application/json",
-            "authorization": "Basic " + base64.b64encode(f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()).decode(),
+            "authorization": "Basic "
+            + base64.b64encode(
+                f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()
+            ).decode(),
         }
 
         payload = {
@@ -291,7 +288,7 @@ class PackageViewSet(ViewSet):
 
         try:
             provider_response = requests.post(
-                settings.TXTCONSOLE_SMS_URL+"/sms",
+                settings.TXTCONSOLE_SMS_URL + "/sms",
                 json=payload,
                 headers=headers,
                 timeout=20,
@@ -312,12 +309,13 @@ class PackageViewSet(ViewSet):
                         status=status.HTTP_502_BAD_GATEWAY,
                     )
         except requests.RequestException as exc:
-            logger.exception("txtConsole OTP send exception for package %s", package.slug)
+            logger.exception(
+                "txtConsole OTP send exception for package %s", package.slug
+            )
             return Response(
                 {"error": "SMS provider request failed"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-
 
     def resolve_customer(self, phone_number, full_name=None):
         customer_default_password = "Pass@123"
@@ -366,7 +364,10 @@ class PackageViewSet(ViewSet):
                 "pickup_area": package.pickup_area,
                 "dropoff_address": package.dropoff_address,
                 "dropoff_area": package.dropoff_area,
-                "status": PackageStatus.objects.filter(package=package).order_by("-updated_at").first().status,
+                "status": PackageStatus.objects.filter(package=package)
+                .order_by("-updated_at")
+                .first()
+                .status,
                 "city": package.city.name,
                 "driver_name": (
                     f"{package.biker.user.first_name} {package.biker.user.last_name}".strip()
@@ -454,10 +455,10 @@ class PackageViewSet(ViewSet):
         amount = float(price.base_price) + (float(price.rate_per_km) * distance_km)
         if is_fast_delivery:
             amount *= float(price.fast_delivery_multiplier)
-        
+
         decimal_part = amount - math.floor(amount)
         if decimal_part > 0.40:
-            amount = math.ceil(amount)   # round up
+            amount = math.ceil(amount)  # round up
         else:
             amount = math.floor(amount)
 
@@ -497,10 +498,14 @@ class PackageViewSet(ViewSet):
                 {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
             )
         normalized_query = query.lower()
-        suburbs_qs = Suburb.objects.filter(
-            Q(name__icontains=query),
-            Q(city__id=city_id) if city_id else Q(),
-        ).values_list("name", flat=True).distinct()
+        suburbs_qs = (
+            Suburb.objects.filter(
+                Q(name__icontains=query),
+                Q(city__id=city_id) if city_id else Q(),
+            )
+            .values_list("name", flat=True)
+            .distinct()
+        )
         suburbs = list(suburbs_qs)
 
         SuburbSearchLog.objects.create(
