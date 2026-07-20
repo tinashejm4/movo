@@ -7,9 +7,12 @@ class ErrorResponseSerializer(serializers.Serializer):
 
 class PackageListItemSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
+    slug = serializers.CharField()
     role = serializers.CharField()
     status = serializers.CharField()
+    is_active = serializers.BooleanField()
     city = serializers.CharField()
+    
     pickup_location = serializers.CharField()
     dropoff_location = serializers.CharField()
     is_fast_delivery = serializers.BooleanField()

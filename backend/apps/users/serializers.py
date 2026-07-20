@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from .models import City
 
 
 class ErrorResponseSerializer(serializers.Serializer):
@@ -53,3 +54,12 @@ class CustomerProfileResponseSerializer(serializers.Serializer):
 class CustomerProfilePatchRequestSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=False)
     last_name = serializers.CharField(required=False)
+
+
+class CitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = City
+        fields = ["id", "name", "province", "country"]
+        read_only_fields = [
+            "id",
+        ]
