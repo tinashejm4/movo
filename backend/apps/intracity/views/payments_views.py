@@ -1,37 +1,51 @@
-import base64
 import random
-import string
-import json
+
+from paynow import Paynow
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-from django.conf import settings
+import os
+import requests
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
-from apps.bookkeeping.models import Account, IntracitySale
+from django.urls import reverse
+from ..models import Invoice, EcocashPayment
+from apps.users.models import Customer
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..serializers.payment_serializer import (
-    EcocashPaymentProcessedResponseSerializer,
-    EcocashPaymentRequestSerializer,
-    EcocashPaymentResponseSerializer,
+    MobilePaymentRequestSerializer,
+    MobilePaymentResponseSerializer,
     PaymentErrorResponseSerializer,
     PaymentProviderErrorResponseSerializer,
+    EcocashPaymentRequestSerializer,
+    EcocashPaymentResponseSerializer,
 )
+from apps.users.utils import is_valid_zimbabwean_number,normalize_zimbabwean_number
+import logging
 
+logger = logging.getLogger(__name__)
+
+paynow = Paynow(
+        os.environ.get("PAYNOW_INTEGRATION_ID", ""),
+        os.environ.get("PAYNOW_INTEGRATION_KEY", ""),
+        "http://google.com",
+        "http://google.com",
+        )
 
 class PaymentViewSet(ViewSet):
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        if getattr(self, "action", None) == "ecocash_notify":
+            return [AllowAny()]
+        return [permission() for permission in self.permission_classes]
+    
     @staticmethod
-    def _normalize_basic_auth_header(raw_header: str) -> str:
-        if not raw_header:
-            return ""
-        header = str(raw_header).strip()
-        if header.lower().startswith("basic "):
-            return f"Basic {header[6:].strip()}"
-        return f"Basic {header}"
+    def _is_econet_number(phone_number):
+        return phone_number[4] == "7" or phone_number[4] == "8"
 
     @extend_schema(
         tags=["intracity/Payments"],
@@ -52,176 +66,187 @@ class PaymentViewSet(ViewSet):
             ),
         },
     )
+
     @transaction.atomic
     def ecocash_payment(self, request):
         serializer = EcocashPaymentRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=False)
-        data = serializer.initial_data
-        package_id = data.get("package_id")
-        phone_number = data.get("phone_number")
-        if not package_id:
+        serializer.is_valid(raise_exception=True)
+        invoice_id = serializer.validated_data["invoice_id"]
+        phone_number = serializer.validated_data["phone_number"]
+
+        phone_number = f"263{normalize_zimbabwean_number(phone_number)}"
+
+        if not is_valid_zimbabwean_number(phone_number) or not self.is_econet_number(phone_number):
             return Response(
-                {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # package = get_object_or_404(Package.objects.select_related("sender__user", "receiver__user"), id=package_id)
-        # invoice = get_object_or_404(Invoice, package=package)
-
-        # if invoice.is_paid:
-        #     return Response({"error": "This invoice has already been paid"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not phone_number:
-            return Response(
-                {"error": "phone_number is required for EcoCash payments"},
+                PaymentErrorResponseSerializer(
+                    {
+                        "error": "Invalid Zimbabwean or Econet phone number format",
+                    }
+                ).data,
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        raw_auth_header = settings.ECOCASH_AUTH_HEADER
-        if not raw_auth_header and not (
-            settings.ECOCASH_CLIENT_ID and settings.ECOCASH_SECRET
-        ):
+        invoice = Invoice.objects.filter(id=invoice_id).first()
+
+        if not invoice:
             return Response(
-                {"error": "EcoCash configuration is missing"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                PaymentErrorResponseSerializer(
+                    {
+                        "error": "Invoice not found for the provided package",
+                    }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        def normalize_phone(phone):
-            # Normalize the phone number to the format required by EcoCash
-            if phone.startswith("0"):
-                return f"263{phone[1:]}"
-            elif phone.startswith("+263"):
-                return f"263{phone[4:]}"
-            elif phone.startswith("263"):
-                return phone
-            else:
-                return f"263{phone}"
-
-        normalized_phone = normalize_phone(phone_number)
-        external_id = "".join(random.choices(string.digits, k=6))
-        client_correlator = f"REF-{external_id}"
-        reference_code = f"INV-{external_id}"
-
-        payload = {
-            "clientCorrelator": client_correlator,
-            "referenceCode": reference_code,
-            "tranType": "MER",
-            "endUserId": normalized_phone,
-            "paymentAmount": {
-                "charginginformation": {
-                    "amount": "1.00",
-                    # "amount": f"{float(invoice.amount):.2f}",
-                    "currency": "USD",
-                    "description": "Intracity Payment",
-                },
-                "chargeMetaData": {"channel": "WEB"},
-            },
-            "merchantCode": settings.ECOCASH_MERCHANT_CODE,
-            "merchantPin": settings.ECOCASH_MERCHANT_PIN,
-            "merchantNumber": settings.ECOCASH_MERCHANT_NUMBER,
-            "countryCode": "ZW",
-            "terminalID": settings.ECOCASH_TERMINAL_ID,
-            "location": settings.ECOCASH_LOCATION,
-            "superMerchantName": settings.ECOCASH_SUPER_MERCHANT_NAME,
-            "merchantName": settings.ECOCASH_MERCHANT_NAME,
-            "transactionOperationStatus": "Charged",
-            "remarks": "Intracity Payment",
-            "notifyUrl": settings.ECOCASH_NOTIFY_URL,
-        }
-
-        if not raw_auth_header:
-            raw_auth_header = base64.b64encode(
-                f"{settings.ECOCASH_CLIENT_ID}:{settings.ECOCASH_SECRET}".encode()
-            ).decode()
-
-        headers = {
+        headers={
             "Content-Type": "application/json",
-            "Authorization": self._normalize_basic_auth_header(raw_auth_header),
-        }
+            "Authorization": os.environ.get("ECOCASH_AUTH_HEADER"),
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        }  # Removed the trailing comma to make it a dictionary instead of a tuple
+        
+        url = os.environ.get("ECOCASH_API_URL", "https://developers.ecocash.co.zw/sandbox/payment/v1/") + "transactions/amount/"
 
-        req = Request(
-            settings.ECOCASH_PAYMENT_URL,
-            data=json.dumps(payload).encode("utf-8"),
+        data = {
+                "clientCorrelator": "REF-" + str(invoice.package.slug) + "-" + str(random.randint(100000, 999999)),
+                "referenceCode": f"{invoice_id}",
+                "tranType": "MER",
+                "endUserId": phone_number,
+                "paymentAmount": {
+                    "charginginformation": {
+                        "amount": "1.00",
+                        "currency": "USD",
+                        "description": "Online Payment"
+                    },
+                    "chargeMetaData": {
+                        "channel": "WEB"
+                    }
+                },
+                "merchantCode": "287164",
+                "merchantPin": "1234",
+                "merchantNumber": "778503033",
+                "countryCode": "ZW",
+                "terminalID": "TERM001",
+                "location": "Harare",
+                "superMerchantName": "EcoCash Sandbox",
+                "merchantName": "Test Merchant",
+                "transactionOperationStatus": "Charged",
+                "remarks": "Online Payment",
+                "notifyUrl": request.build_absolute_uri(
+                    reverse("intracity_ecocash_notify")
+                ),
+            }
+
+        response = requests.post(
+            url,
             headers=headers,
-            method="POST",
+            json=data
         )
-        with urlopen(req, timeout=30) as response:
-            provider_response = json.loads(response.read().decode("utf-8"))
-        try:
-            req = Request(
-                settings.ECOCASH_PAYMENT_URL,
-                data=json.dumps(payload).encode("utf-8"),
-                headers=headers,
-                method="POST",
-            )
-            with urlopen(req, timeout=30) as response:
-                provider_response = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            try:
-                error_body = exc.read().decode("utf-8")
-                provider_response = json.loads(error_body)
-            except Exception:
-                provider_response = {"error": str(exc), "reason": str(exc.reason)}
-            return Response(
-                {"error": "EcoCash request failed", "details": provider_response},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-        except URLError as exc:
-            return Response(
-                {"error": "EcoCash service unreachable", "details": str(exc.reason)},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
 
-        operation_status = provider_response.get(
-            "transactionOperationStatus"
-        ) or provider_response.get("transactionStatus")
-        if not operation_status or operation_status.lower() != "charged":
+        if response.status_code != 200:
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {
+                        "error": "Payment request failed",
+                        "details": response.text,
+                    }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        provider_data = response.json()
+
+        ecocash_payment = EcocashPayment.objects.create(
+            customer=Customer.objects.get(user=request.user),
+            invoice=invoice,
+            phone_number=phone_number,
+            client_correlator=provider_data.get("clientCorrelator"),
+            request_response=response.json(),
+        )
+
+        return Response(
+            {
+                "message": "Payment request successful",
+                "details": provider_data,
+            },
+            status=status.HTTP_200_OK,
+        )
+    
+    @transaction.atomic
+    def ecocash_update_payment_status(self, request):
+
+
+
+        return Response(
+            {"message": "Use ecocash_notify endpoint for provider callbacks."},
+            status=status.HTTP_200_OK,
+        )
+
+# Cannot be tested on localhost. Therefore, this endpoint is designed to be called by the EcoCash provider's callback mechanism.
+#test when hosted on a public server with a valid SSL certificate. The endpoint should be configured in the EcoCash provider's settings to receive payment notifications.
+    @transaction.atomic
+    def ecocash_notify(self, request):
+        payload = request.data if isinstance(request.data, dict) else {}
+        logger.warning(
+            "Received EcoCash notify payload: %s",
+            self._to_json_safe(payload),
+        )
+
+        response_code = str(payload.get("ecocashResponseCode", "")).strip().upper()
+        merchant_reference = str(payload.get("orginalMerchantReference", "")).strip()
+
+        if response_code != "SUCCEEDED":
             return Response(
                 {
-                    "error": "EcoCash payment not completed",
-                    "provider_response": provider_response,
+                    "message": "Notification failed",
+                    "ecocashResponseCode": response_code,
+                    "orginalMerchantReference": merchant_reference,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        serializer = EcocashPaymentResponseSerializer({})
-        return Response(serializer.data)
 
-        if not invoice.is_pay_forward:
-            if not account_id:
-                return Response(
-                    {
-                        "error": "account_id is required to record sale for non-pay-forward invoices"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            account = Account.objects.filter(id=account_id).first()
-            if not account:
-                return Response(
-                    {"error": "Account not found"}, status=status.HTTP_404_NOT_FOUND
-                )
-
-            IntracitySale.objects.get_or_create(
-                invoice=invoice,
-                defaults={
-                    "account": account,
-                    "amount": float(invoice.amount),
-                },
+        if not merchant_reference.isdigit():
+            return Response(
+                {"error": "Invalid orginalMerchantReference"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invoice.is_paid = True
-        invoice.paid_at = timezone.now()
-        invoice.save(update_fields=["is_paid", "paid_at"])
+        invoice_id = int(merchant_reference)
 
-        serializer = EcocashPaymentProcessedResponseSerializer(
-            {
-                "message": "EcoCash payment processed successfully",
-                "invoice_id": invoice.id,
-                "amount": float(invoice.amount),
-                "provider_response": provider_response,
-                "paid_at": invoice.paid_at,
-            }
+        invoice = Invoice.objects.filter(id=invoice_id).first()
+        if not invoice:
+            return Response(
+                {"error": "Invoice not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not invoice.is_paid:
+            invoice.is_paid = True
+            invoice.paid_at = timezone.now()
+            invoice.payment_method = "Ecocash"
+            invoice.save(update_fields=["is_paid", "paid_at", "payment_method"])
+
+        ecocash_payment = EcocashPayment.objects.filter(invoice=invoice).order_by("-created_at").first()
+        if ecocash_payment:
+            ecocash_payment.is_successful = True
+            ecocash_payment.paid_at = invoice.paid_at
+            ecocash_payment.provider_response = payload
+            ecocash_payment.save(update_fields=["is_successful", "paid_at", "provider_response"])
+
+        logger.info(
+            "EcoCash notify success. invoice_id=%s response_code=%s merchant_reference=%s",
+            invoice.id,
+            response_code,
+            merchant_reference,
         )
+
         return Response(
-            serializer.data,
+            {
+                "message": "Notification processed",
+                "invoice_id": invoice.id,
+                "updated": True,
+                "is_paid": True,
+                "ecocashResponseCode": response_code,
+                "orginalMerchantReference": merchant_reference,
+            },
             status=status.HTTP_200_OK,
         )

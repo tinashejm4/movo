@@ -46,9 +46,23 @@ class DropoffVerificationResponseSerializer(serializers.Serializer):
 
 class CancelOrderRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
+    reason = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class CancelOrderResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
     package_id = serializers.IntegerField()
     status = serializers.CharField()
+
+class IsBikerAssignedRequestSerializer(serializers.Serializer):
+    package_id = serializers.IntegerField()
+
+class IsBikerAssignedResponseSerializer(serializers.Serializer):
+    is_assigned = serializers.BooleanField()
+    package_id = serializers.IntegerField()
+    biker_id = serializers.IntegerField(allow_null=True)
+    biker_name = serializers.CharField(allow_null=True, allow_blank=True)
+    biker_phone = serializers.CharField(allow_null=True, allow_blank=True)
+    
+class IsBikerAssignedErrorResponseSerializer(serializers.Serializer):
+    error = serializers.CharField()
