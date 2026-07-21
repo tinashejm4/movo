@@ -10,7 +10,7 @@ from apps.bookkeeping.models import Account, IntracitySale
 from apps.users.models import City, Suburb
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Biker, Package, PackageStatus, Invoice, SuburbSearchLog
-
+import logging
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
     DeliveryErrorResponseSerializer,
@@ -20,7 +20,12 @@ from ..serializers.delivery_serializers import (
     DropoffVerificationResponseSerializer,
     CancelOrderRequestSerializer,
     CancelOrderResponseSerializer,
+    IsBikerAssignedRequestSerializer,
+    IsBikerAssignedResponseSerializer,
+    IsBikerAssignedErrorResponseSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 class DeliveryViewSet(ViewSet):
     permission_classes = [IsAuthenticated]
@@ -384,3 +389,68 @@ class DeliveryViewSet(ViewSet):
             serializer.data,
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        tags=["intracity/Delivery"],
+        parameters = [IsBikerAssignedRequestSerializer],
+        responses={
+            200: IsBikerAssignedResponseSerializer,
+            400: OpenApiResponse(
+                IsBikerAssignedErrorResponseSerializer,
+                description="Incorrect request parameters",
+            ),
+            403: OpenApiResponse(
+                IsBikerAssignedErrorResponseSerializer,
+                description="User is not assigned to this package",
+            ),
+        },
+    )
+    def is_biker_assigned(self, request):
+        serializer = IsBikerAssignedRequestSerializer(data=request.data)
+        data = serializer.initial_data
+        serializer.is_valid(raise_exception=False)
+        package_id = data.get("package_id")
+        logger.warning(f"Checking if biker is assigned for package_id: {package_id}")
+        if not package_id:
+            return Response(
+                IsBikerAssignedErrorResponseSerializer(
+                    {"error": "package_id query parameter is required"}
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        package = Package.objects.filter(id=package_id).first()
+        if not package:
+            return Response(
+                IsBikerAssignedErrorResponseSerializer(
+                    {"error": "Package not found"}
+                ).data,
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if package and package.biker:
+            biker = package.biker
+            return Response(
+                IsBikerAssignedResponseSerializer(
+                {
+                    "is_assigned": True,
+                    "package_id": package.id,
+                    "biker_id": biker.id,
+                    "biker_name": f"{biker.user.first_name} {biker.user.last_name}".strip(),
+                    "biker_phone": f"0{biker.user.username}",
+                },
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+        else:
+            return Response(
+                IsBikerAssignedResponseSerializer(
+                    {
+                        "is_assigned": False,
+                        "package_id": package.id,
+                        "biker_id": None,
+                        "biker_name": None,
+                        "biker_phone": None,
+                    }
+                ).data,
+                status=status.HTTP_200_OK,
+            )
