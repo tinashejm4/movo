@@ -9,7 +9,6 @@ from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import City, Contact, Customer, Suburb
 from apps.bookkeeping.models import ExchangeRate
@@ -39,7 +38,7 @@ class PackageViewSet(ViewSet):
     def get_permissions(self):
         if self.action in {"create_package", "list_packages", "package_detail"}:
             return [IsAuthenticated()]
-        if self.action in {"calculate_price", "search_suburb"}:
+        if self.action in {"package_price", "search_suburb"}:
             return [AllowAny()]
         return [IsAuthenticated()]
 
@@ -399,7 +398,7 @@ class PackageViewSet(ViewSet):
         },
     )
     @transaction.atomic
-    def calculate_price(self, request):
+    def package_price(self, request):
         serializer = PackagePriceRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=False)
         data = serializer.initial_data

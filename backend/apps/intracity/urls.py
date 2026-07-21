@@ -9,7 +9,7 @@ package_create = PackageViewSet.as_view({"post": "create_package"})
 package_detail = PackageViewSet.as_view({"get": "package_detail"})
 package_list = PackageViewSet.as_view({"get": "list_packages"})
 search_suburb = PackageViewSet.as_view({"post": "search_suburb"})
-package_price = PackageViewSet.as_view({"get": "calculate_price"})
+package_price = PackageViewSet.as_view({"post": "package_price"})
 
 assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packages"})
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
@@ -34,6 +34,10 @@ urlpatterns = [
     path("package/", 
          package_detail, 
          name="intracity_package_detail"
+         ),
+    path("calculate-price/", 
+         package_price, 
+         name="intracity_package_price"
          ),
     path("packages/", 
          package_list, 
