@@ -23,12 +23,20 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 
+
+from django.http import JsonResponse
+def health(request):
+    return JsonResponse({"status": "ok"})
+
 app_urlpatterns = [
     path("api/users/", include("apps.users.urls")),
     path("api/intercity/", include("apps.intercity.urls")),
     path("api/intracity/", include("apps.intracity.urls")),
     path("api/bookkeeping/", include("apps.bookkeeping.urls")),
 ]
+
+app_urlpatterns += [path("health/", health)]
+
 
 third_party_urlpatterns = [
     # ? Swagger and Redoc API documentation

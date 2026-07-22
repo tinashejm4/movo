@@ -80,12 +80,15 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo.co.zw",
+]
+
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Next.js dev server
-    "http://localhost:54404",
-    "http://localhost:43766",
-    "http://localhost:59837",
-    "http://localhost:8080",  # Vue or Flutter web
+    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo.co.zw",
+
 ]
 
 REST_FRAMEWORK = {
