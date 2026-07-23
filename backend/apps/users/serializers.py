@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import City
+from .models import City, Suburb
 
 
 class ErrorResponseSerializer(serializers.Serializer):
@@ -60,6 +60,14 @@ class CitySerializer(serializers.ModelSerializer):
     class Meta:
         model = City
         fields = ["id", "name", "province", "country"]
+        read_only_fields = [
+            "id",
+        ]
+
+class SuburbSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Suburb
+        fields = ["id", "name", "city", 'x_pos', 'y_pos']
         read_only_fields = [
             "id",
         ]

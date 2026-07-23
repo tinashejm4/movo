@@ -33,6 +33,7 @@ app_urlpatterns = [
     path("api/intercity/", include("apps.intercity.urls")),
     path("api/intracity/", include("apps.intracity.urls")),
     path("api/bookkeeping/", include("apps.bookkeeping.urls")),
+    path("api/health/", include("apps.health.urls")),
 ]
 
 app_urlpatterns += [path("health/", health)]
