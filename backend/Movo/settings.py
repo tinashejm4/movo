@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "apps.intercity.apps.IntercityConfig",
     "apps.intracity.apps.IntracityConfig",
     "apps.bookkeeping.apps.BookkeepingConfig",
+    "apps.health.apps.HealthConfig",
 ]
 
 MIDDLEWARE = [
@@ -104,7 +105,7 @@ SPECTACULAR_SETTINGS = {
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),  # default is 5 minutes
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),  # default is 1 day
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),  # default is 1 day
 }
 
 ROOT_URLCONF = "Movo.urls"

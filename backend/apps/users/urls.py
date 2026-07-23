@@ -7,11 +7,12 @@ from .views import (
     StaffLoginView,
     TokenRefreshView,
     CustomerRegisterLoginView,
-    CityViewSet,
+    CityViewSet,SuburbViewSet,
 )
 
 router = DefaultRouter()
 router.register(r"cities", CityViewSet, basename="city")
+router.register(r"suburbs", SuburbViewSet, basename="suburb")
 
 urlpatterns = [
     path("staff/login/", StaffLoginView.as_view(), name="staff_token_obtain_pair"),
