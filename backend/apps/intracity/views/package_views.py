@@ -248,25 +248,27 @@ class PackageViewSet(ViewSet):
 
         # message to receiver
         if package.is_sender_initiated:
+            address = package.dropoff_address
+            if len(address) > 20:
+                address = address[:20] + "..."
             sender = package.sender.user
             sender_name = sender.first_name + " " + sender.last_name
-            message = f"""
-                        MOVO Courier: You have a package from {sender_name}. Collection OTP: {package.receiver_code}. Tracking No: {package.slug}.
-                    """
+            message = f"""You have a package from {sender_name} to {address}. Collection OTP: {package.receiver_code}. Tracking No: {package.slug}."""
             if invoice.is_pay_forward:
-                message = message + " " + f"Amount Due on Delivery: ${invoice.amount}"
+                message = " ".join([message, f"Amount Due on Delivery: ${invoice.amount:.2f}"])
             else:
-                message = message + " " + "Please be ready to receive your delivery."
+                message = " ".join([message, "Please be ready to receive your delivery."])
         else:
-            receiver = package.sender.user
+            address = package.pickup_address
+            if len(address) > 20:
+                address = address[:20] + "..."
+            receiver = package.receiver.user
             receiver_name = receiver.first_name + " " + receiver.last_name
-            message = f"""
-                        MOVO Courier: Your package for {receiver_name} has been booked. Collection OTP: {package.sender_code}. Tracking No: {package.slug}.
-                    """
+            message = f"""A package for {receiver_name} has been booked from {address}. Collection OTP: {package.sender_code}. Tracking No: {package.slug}."""
             if not invoice.is_pay_forward:
-                message = message + " " + f"Amount Due on Collection: ${invoice.amount}"
+                message = " ".join([message, f"Amount Due on Collection: ${invoice.amount:.2f}"])
             else:
-                message = message + " " + "Please prepare the package for collection."
+                message = " ".join([message, "Please prepare the package for collection."])
 
         headers = {
             "accept": "application/json",
@@ -328,8 +330,8 @@ class PackageViewSet(ViewSet):
             user = User.objects.create_user(
                 username=phone_number,
                 password=customer_default_password,
-                first_name=first_name,
-                last_name=last_name,
+                first_name=first_name.capitalize(),
+                last_name=last_name.capitalize(),
             )
 
         Contact.objects.get_or_create(

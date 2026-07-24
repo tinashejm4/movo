@@ -17,5 +17,5 @@ if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ] && [ "$D
 fi
 
 # Start Django’s dev server, binding to Azure’s $PORT
-echo "Starting Django runserver..."
-exec python manage.py runserver 0.0.0.0:80
+echo "Starting Django runserver on port ${PORT:-8000}..."
+exec python manage.py runserver 0.0.0.0:${PORT:-8000}

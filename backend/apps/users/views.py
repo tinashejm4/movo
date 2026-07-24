@@ -439,7 +439,7 @@ class CustomerProfileView(viewsets.ModelViewSet):
                     {"error": f"{field} is required"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            updates[field] = str(value).strip()
+            updates[field] = str(value).strip().capitalize()
 
         for field, value in updates.items():
             setattr(user, field, value)
