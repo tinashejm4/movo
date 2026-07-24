@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
@@ -25,12 +26,16 @@ from ..serializers.package_serializers import (
     SuburbSearchResponseSerializer,
 )
 from ..models import Package, PackageStatus, Invoice, Price, SuburbSearchLog
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from apps.users.utils import normalize_zimbabwean_number, is_valid_zimbabwean_number
 
 logger = logging.getLogger(__name__)
 
-# TODO list, $id
+
+class PackageListPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 class PackageViewSet(ViewSet):
@@ -46,6 +51,19 @@ class PackageViewSet(ViewSet):
     @extend_schema(
         tags=["intracity/Packages"],
         request=None,
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                description=(
+                    "Search by tracking slug, address, city, package status, or "
+                    "sender, receiver, or driver details."
+                ),
+                required=False,
+                type=str,
+            ),
+            OpenApiParameter(name="page", required=False, type=int),
+            OpenApiParameter(name="page_size", required=False, type=int),
+        ],
         responses={
             200: PackageListSerializer,
             400: OpenApiResponse(
@@ -74,8 +92,30 @@ class PackageViewSet(ViewSet):
             .order_by("-added_at")
         )
 
+        search_query = request.query_params.get("search", "").strip()
+        if search_query:
+            packages = packages.filter(
+                Q(slug__icontains=search_query)
+                | Q(pickup_address__icontains=search_query)
+                | Q(dropoff_address__icontains=search_query)
+                | Q(city__name__icontains=search_query)
+                | Q(current_status__icontains=search_query)
+                | Q(sender__user__first_name__icontains=search_query)
+                | Q(sender__user__last_name__icontains=search_query)
+                | Q(sender__user__username__icontains=search_query)
+                | Q(receiver__user__first_name__icontains=search_query)
+                | Q(receiver__user__last_name__icontains=search_query)
+                | Q(receiver__user__username__icontains=search_query)
+                | Q(biker__user__first_name__icontains=search_query)
+                | Q(biker__user__last_name__icontains=search_query)
+                | Q(biker__user__username__icontains=search_query)
+            )
+
+        paginator = PackageListPagination()
+        page = paginator.paginate_queryset(packages, request, view=self)
+
         response_data = []
-        for package in packages:
+        for package in page:
             package_status = package.current_status or "Pending"
             if package.sender.user_id == request.user.id:
                 role = "sender"
@@ -102,10 +142,7 @@ class PackageViewSet(ViewSet):
                 }
             )
 
-        serializer = PackageListSerializer(
-            {"count": len(response_data), "results": response_data}
-        )
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return paginator.get_paginated_response(response_data)
 
     @extend_schema(
         tags=["intracity/Packages"],
