@@ -15,6 +15,7 @@ from rest_framework.viewsets import ViewSet
 from apps.users.models import City, Contact, Customer, Suburb
 from apps.bookkeeping.models import ExchangeRate
 from ..serializers.package_serializers import (
+    CurrentPackageStatusSerializer,
     ErrorResponseSerializer,
     PackageDetailQuerySerializer,
     PackageDetailSerializer,
@@ -42,11 +43,82 @@ class PackageViewSet(ViewSet):
     ACTIVE_PACKAGE_STATUSES = {"Pending", "In Transit"}
 
     def get_permissions(self):
-        if self.action in {"create_package", "list_packages", "package_detail"}:
+        if self.action in {
+            "create_package",
+            "list_packages",
+            "package_detail",
+            "current_status",
+        }:
             return [IsAuthenticated()]
         if self.action in {"package_price", "search_suburb"}:
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    @extend_schema(
+        tags=["intracity/Packages"],
+        parameters=[PackageDetailQuerySerializer],
+        responses={
+            200: CurrentPackageStatusSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="package_id is required"
+            ),
+            404: OpenApiResponse(
+                ErrorResponseSerializer, description="Package not found"
+            ),
+        },
+    )
+    def current_status(self, request):
+        package_id = request.query_params.get("package_id")
+        if not package_id:
+            return Response(
+                {"error": "package_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        package = (
+            Package.objects.select_related("sender__user", "receiver__user", "biker__user")
+            .filter(id=package_id)
+            .filter(
+                Q(sender__user=request.user)
+                | Q(receiver__user=request.user)
+                | Q(biker__user=request.user)
+            )
+            .first()
+        )
+        if not package:
+            return Response(
+                {"error": f"Package not found for id {package_id}"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        status_records = list(
+            PackageStatus.objects.filter(package=package).order_by("updated_at")
+        )
+        latest_status = status_records[-1] if status_records else None
+
+        status_map = {}
+        for status_record in status_records:
+            status_map.setdefault(status_record.status, status_record.updated_at)
+
+        delivered_at = package.delivered_at or status_map.get("Delivered")
+        collected_at = status_map.get("In Transit")
+        cancelled_at = status_map.get("Cancelled")
+
+        payload = {
+            "package_id": package.id,
+            "slug": package.slug,
+            "status": latest_status.status if latest_status else "Pending",
+            "status_updated_at": latest_status.updated_at if latest_status else None,
+            "is_active": (latest_status.status if latest_status else "Pending")
+            in self.ACTIVE_PACKAGE_STATUSES,
+            "is_collected": collected_at is not None or delivered_at is not None,
+            "collected_at": collected_at,
+            "is_cancelled": cancelled_at is not None,
+            "cancelled_at": cancelled_at,
+            "is_delivered": delivered_at is not None,
+            "delivered_at": delivered_at,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["intracity/Packages"],

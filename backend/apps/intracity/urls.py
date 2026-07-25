@@ -8,6 +8,7 @@ from .views.payments_views import PaymentViewSet
 package_create = PackageViewSet.as_view({"post": "create_package"})
 package_detail = PackageViewSet.as_view({"get": "package_detail"})
 package_list = PackageViewSet.as_view({"get": "list_packages"})
+package_status = PackageViewSet.as_view({"get": "current_status"})
 search_suburb = PackageViewSet.as_view({"post": "search_suburb"})
 package_price = PackageViewSet.as_view({"post": "package_price"})
 
@@ -35,6 +36,11 @@ urlpatterns = [
          package_detail, 
          name="intracity_package_detail"
          ),
+    path(
+        "package-status/",
+        package_status,
+        name="intracity_package_status",
+    ),
     path("calculate-price/", 
          package_price, 
          name="intracity_package_price"

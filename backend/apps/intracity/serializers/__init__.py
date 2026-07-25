@@ -14,6 +14,7 @@ from .invoice_serializer import (
     InvoiceErrorResponseSerializer,
 )
 from .package_serializers import (
+    CurrentPackageStatusSerializer,
     ErrorResponseSerializer,
     PackageCreateSerializer,
     PackageDetailQuerySerializer,
@@ -44,6 +45,7 @@ __all__ = [
     "InvoiceAmountQuerySerializer",
     "InvoiceAmountResponseSerializer",
     "InvoiceErrorResponseSerializer",
+    "CurrentPackageStatusSerializer",
     "ErrorResponseSerializer",
     "PackageCreateSerializer",
     "PackageDetailQuerySerializer",

@@ -58,6 +58,20 @@ class PackageDetailQuerySerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
 
 
+class CurrentPackageStatusSerializer(serializers.Serializer):
+    package_id = serializers.IntegerField()
+    slug = serializers.CharField()
+    status = serializers.CharField()
+    status_updated_at = serializers.DateTimeField(allow_null=True)
+    is_active = serializers.BooleanField()
+    is_collected = serializers.BooleanField()
+    collected_at = serializers.DateTimeField(allow_null=True)
+    is_cancelled = serializers.BooleanField()
+    cancelled_at = serializers.DateTimeField(allow_null=True)
+    is_delivered = serializers.BooleanField()
+    delivered_at = serializers.DateTimeField(allow_null=True)
+
+
 class PackageCreateSerializer(serializers.Serializer):
     phone = serializers.CharField(required=False)
     name = serializers.CharField(required=False)
