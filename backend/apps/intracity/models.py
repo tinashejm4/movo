@@ -73,7 +73,7 @@ class Invoice(models.Model):
 
     def amount_in_zig(self):
         if self.exchange_rate:
-            return self.amount * self.exchange_rate.rate
+            return float(self.amount) * float(self.exchange_rate.rate)
         return None
 
 class Price(models.Model):

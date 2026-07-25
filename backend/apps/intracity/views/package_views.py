@@ -114,33 +114,28 @@ class PackageViewSet(ViewSet):
         paginator = PackageListPagination()
         page = paginator.paginate_queryset(packages, request, view=self)
 
-        response_data = []
-        for package in page:
-            package_status = package.current_status or "Pending"
-            if package.sender.user_id == request.user.id:
-                role = "sender"
-            elif package.receiver.user_id == request.user.id:
-                role = "receiver"
-            else:
-                role = "biker"
-            response_data.append(
-                {
-                    "package_id": package.id,
-                    "slug": package.slug,
-                    "role": role,
-                    "status": package_status,
-                    "is_active": package_status in self.ACTIVE_PACKAGE_STATUSES,
-                    "city": package.city.name,
-                    "pickup_location": package.pickup_address,
-                    "dropoff_location": package.dropoff_address,
-                    "is_fast_delivery": package.is_fast_delivery,
-                    "sender_name": f"{package.sender.user.first_name} {package.sender.user.last_name}".strip(),
-                    "receiver_name": f"{package.receiver.user.first_name} {package.receiver.user.last_name}".strip(),
-                    "assigned_at": package.assigned_at,
-                    "delivered_at": package.delivered_at,
-                    "added_at": package.added_at,
-                }
+        page_packages = list(page)
+        package_ids = [package.id for package in page_packages]
+        invoices_by_package_id = {
+            invoice.package_id: invoice
+            for invoice in Invoice.objects.filter(package_id__in=package_ids)
+        }
+        status_records_by_package_id = {}
+        for status_record in PackageStatus.objects.filter(
+            package_id__in=package_ids
+        ).order_by("updated_at"):
+            status_records_by_package_id.setdefault(status_record.package_id, []).append(
+                status_record
             )
+
+        response_data = [
+            self.build_package_payload(
+                package=package,
+                invoice=invoices_by_package_id.get(package.id),
+                status_records=status_records_by_package_id.get(package.id, []),
+            )
+            for package in page_packages
+        ]
 
         return paginator.get_paginated_response(response_data)
 
@@ -161,20 +156,20 @@ class PackageViewSet(ViewSet):
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        package = get_object_or_404(
-            Package.objects.select_related(
-                "sender__user",
-                "receiver__user",
-                "city",
-                "biker__user",
-            ),
-            id=package_id,
-        )
+        package = Package.objects.filter(id=package_id).first()
+        if not package:
+            return Response(
+                {"error": f"Package not found for id {package_id}"}, status=status.HTTP_404_NOT_FOUND
+            )
 
         invoice = Invoice.objects.filter(package=package).first()
+        status_records = list(
+            PackageStatus.objects.filter(package=package).order_by("updated_at")
+        )
 
         return Response(
-            self.serialize_package(package, invoice), status=status.HTTP_200_OK
+            self.build_package_payload(package, invoice, status_records),
+            status=status.HTTP_200_OK,
         )
 
     @extend_schema(
@@ -270,9 +265,12 @@ class PackageViewSet(ViewSet):
         )
 
         self.send_receiver_sms(counterpart_phone, package, invoice)
+        status_records = list(
+            PackageStatus.objects.filter(package=package).order_by("updated_at")
+        )
 
         return Response(
-            self.serialize_package(package, invoice),
+            self.build_package_payload(package, invoice, status_records),
             status=status.HTTP_201_CREATED,
         )
 
@@ -390,7 +388,20 @@ class PackageViewSet(ViewSet):
             if not Package.objects.filter(receiver_code=code).exists():
                 return code
 
-    def serialize_package(self, package, invoice=None):
+    def build_package_payload(self, package, invoice=None, status_records=None):
+        if status_records is None:
+            status_records = list(
+                PackageStatus.objects.filter(package=package).order_by("updated_at")
+            )
+
+        status_map = {}
+        for status_record in status_records:
+            status_map.setdefault(status_record.status, status_record.updated_at)
+
+        delivered_at = package.delivered_at or status_map.get("Delivered")
+        collected_at = status_map.get("In Transit")
+        cancelled_at = status_map.get("Cancelled")
+
         serializer = PackageDetailSerializer(
             {
                 "package_id": package.id,
@@ -399,15 +410,14 @@ class PackageViewSet(ViewSet):
                 "receiver_name": f"{package.receiver.user.first_name} {package.receiver.user.last_name}".strip(),
                 "sender_id": package.sender.id,
                 "sender_name": f"{package.sender.user.first_name} {package.sender.user.last_name}".strip(),
+                "sender_phone": self.get_phone_number(package.sender.user),
+                "receiver_phone": self.get_phone_number(package.receiver.user),
                 "pickup_address": package.pickup_address,
-                "pickup_area": package.pickup_area,
+                "pickup_area": package.pickup_area_id,
                 "dropoff_address": package.dropoff_address,
-                "dropoff_area": package.dropoff_area,
-                "status": PackageStatus.objects.filter(package=package)
-                .order_by("-updated_at")
-                .first()
-                .status,
+                "dropoff_area": package.dropoff_area_id,
                 "city": package.city.name,
+                "is_fast_delivery": package.is_fast_delivery,
                 "driver_name": (
                     f"{package.biker.user.first_name} {package.biker.user.last_name}".strip()
                     if package.biker
@@ -417,15 +427,27 @@ class PackageViewSet(ViewSet):
                 "sender_code": package.sender_code,
                 "comments": package.comments,
                 "is_sender_initiated": package.is_sender_initiated,
+                "package_created_at": package.added_at,
                 "driver_id": package.biker.id if package.biker else None,
-                "assigned_at": package.assigned_at,
-                "delivered_at": package.delivered_at,
+                "driver_assigned_at": package.assigned_at,
+                "invoice_id": invoice.id if invoice else None,
+                "is_collected": collected_at is not None or delivered_at is not None,
+                "collected_at": collected_at,
+                "is_cancelled": cancelled_at is not None,
+                "cancelled_at": cancelled_at,
+                "is_delivered": delivered_at is not None,
+                "delivered_at": delivered_at,
                 "invoice_amount": invoice.amount if invoice else None,
                 "invoice_amount_zig": invoice.amount_in_zig() if invoice else None,
-                "added_at": package.added_at,
             }
         )
         return serializer.data
+
+    def get_phone_number(self, user):
+        contact = getattr(user, "contact", None)
+        if contact and contact.phone_number:
+            return contact.phone_number
+        return ""
 
     @extend_schema(
         tags=["intracity/Packages"],
