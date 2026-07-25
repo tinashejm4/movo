@@ -23,6 +23,8 @@ from apps.users.serializers import (
     TokenPairResponseSerializer,
     TokenRefreshRequestSerializer,
     TokenRefreshResponseSerializer,
+    LogoutRequestSerializer,
+    LogoutResponseSerializer,
 )
 from .models import OTP, City, Contact, Customer, Staff, Suburb
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -179,6 +181,54 @@ class TokenRefreshView(SimpleJWTTokenRefreshView):
             )
 
         return super().post(request, *args, **kwargs)
+
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Users"],
+        request=LogoutRequestSerializer,
+        responses={
+            200: LogoutResponseSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="Missing or invalid refresh token"
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Refresh token does not belong to authenticated user",
+            ),
+        },
+    )
+    def post(self, request):
+        refresh_token = request.data.get("refresh_token")
+        if not refresh_token:
+            return Response(
+                {"error": "refresh token is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            token = RefreshToken(refresh_token)
+        except TokenError:
+            return Response(
+                {"error": "Invalid refresh token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user_id_claim = api_settings.USER_ID_CLAIM
+        token_user_id = token.get(user_id_claim)
+        if str(token_user_id) != str(request.user.id):
+            return Response(
+                {"error": "Refresh token does not belong to authenticated user"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        token.blacklist()
+        return Response(
+            {"message": "Logged out successfully"},
+            status=status.HTTP_200_OK,
+        )
 
 
 class OTPCreateView(APIView):

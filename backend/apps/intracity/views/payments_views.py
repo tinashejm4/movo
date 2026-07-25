@@ -76,7 +76,7 @@ class PaymentViewSet(ViewSet):
 
         phone_number = f"263{normalize_zimbabwean_number(phone_number)}"
 
-        if not is_valid_zimbabwean_number(phone_number) or not self.is_econet_number(phone_number):
+        if not is_valid_zimbabwean_number(phone_number) or not self._is_econet_number(phone_number):
             return Response(
                 PaymentErrorResponseSerializer(
                     {
@@ -113,7 +113,7 @@ class PaymentViewSet(ViewSet):
                 "endUserId": phone_number,
                 "paymentAmount": {
                     "charginginformation": {
-                        "amount": "1.00",
+                        "amount": f"{invoice.amount:.2f}",
                         "currency": "USD",
                         "description": "Online Payment"
                     },

@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -66,3 +67,45 @@ class CustomerOtpAuthTests(APITestCase):
 		self.assertIn("access", login_response.data)
 		self.assertIn("refresh", login_response.data)
 		self.assertFalse(OTP.objects.filter(username=phone_number).exists())
+
+
+class LogoutTests(APITestCase):
+	def setUp(self):
+		self.user = User.objects.create_user(username="logout-user", password="Pass@123")
+		refresh = RefreshToken.for_user(self.user)
+		self.refresh = str(refresh)
+		self.access = str(refresh.access_token)
+		self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.access}")
+
+	def test_logout_blacklists_refresh_token(self):
+		logout_response = self.client.post(
+			reverse("token_logout"),
+			{"refresh": self.refresh},
+			format="json",
+		)
+
+		self.assertEqual(logout_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(logout_response.data["message"], "Logged out successfully")
+
+		refresh_response = self.client.post(
+			reverse("staff_token_refresh"),
+			{"refresh": self.refresh},
+			format="json",
+		)
+		self.assertIn(
+			refresh_response.status_code,
+			[status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED],
+		)
+
+	def test_logout_requires_refresh_token(self):
+		response = self.client.post(reverse("token_logout"), {}, format="json")
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+	def test_logout_requires_authentication(self):
+		self.client.credentials()
+		response = self.client.post(
+			reverse("token_logout"),
+			{"refresh": self.refresh},
+			format="json",
+		)
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

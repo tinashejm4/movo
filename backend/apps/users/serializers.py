@@ -31,6 +31,14 @@ class TokenRefreshResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
 
 
+class LogoutRequestSerializer(serializers.Serializer):
+    refresh_token = serializers.CharField()
+
+
+class LogoutResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+
+
 class OTPCreateRequestSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
 
