@@ -104,8 +104,13 @@ class PackagePriceResponseSerializer(serializers.Serializer):
 
 class SuburbSearchQuerySerializer(serializers.Serializer):
     query = serializers.CharField(required=True)
-    city = serializers.CharField(required=False)
+    city_id = serializers.IntegerField(required=False)
+
+
+class SuburbSearchItemSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
 
 
 class SuburbSearchResponseSerializer(serializers.Serializer):
-    surburb_id = serializers.CharField()
+    suburbs = SuburbSearchItemSerializer(many=True)

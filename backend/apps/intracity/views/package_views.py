@@ -608,9 +608,47 @@ class PackageViewSet(ViewSet):
             status=status.HTTP_200_OK,
         )
 
+
+
     @extend_schema(
-        tags=["intracity/Delivery"],
-        request=SuburbSearchQuerySerializer,
+        tags=["intracity/Packages"],
+        request=None,
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                description=(
+                    "Search by tracking slug, address, city, package status, or "
+                    "sender, receiver, or driver details."
+                ),
+                required=False,
+                type=str,
+            ),
+            OpenApiParameter(name="page", required=False, type=int),
+            OpenApiParameter(name="page_size", required=False, type=int),
+        ],
+        responses={
+            200: SuburbSearchResponseSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="Incorrect request parameters"
+            ),
+        },
+    )
+
+    @extend_schema(
+        tags=["intracity/Packages"],
+        parameters=[
+            OpenApiParameter(
+                name="query",
+                description=(
+                    "Search by suburb name."
+                ),
+                required=False,
+                type=str,
+            ),
+            OpenApiParameter(name="city_id", required=True, type=int),
+            OpenApiParameter(name="page", required=False, type=int),
+            OpenApiParameter(name="page_size", required=False, type=int),
+        ],
         responses={
             200: SuburbSearchResponseSerializer,
             400: OpenApiResponse(
@@ -623,30 +661,29 @@ class PackageViewSet(ViewSet):
         },
     )
     def search_suburb(self, request):
-        data = request.data
-        query = data.get("query", "").strip()
-        city_id = data.get("city")
+        query = request.query_params.get("query", "").strip()
+        city_id = request.query_params.get("city_id") or request.query_params.get("city")
         if not query:
             return Response(
                 {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
             )
         normalized_query = query.lower()
-        suburbs_qs = (
-            Suburb.objects.filter(
-                Q(name__icontains=query),
-                Q(city__id=city_id) if city_id else Q(),
+
+        suburbs_qs = Suburb.objects.filter(name__icontains=query)
+        if city_id:
+            suburbs_qs = suburbs_qs.filter(city__id=city_id)
+
+        suburbs = list(
+            suburbs_qs.order_by("name").values("id", "name").distinct()
+        )
+
+        if len(query) > 2:
+            SuburbSearchLog.objects.create(
+                query=query,
+                normalized_query=normalized_query,
+                result_count=len(suburbs),
+                had_results=bool(suburbs),
+                user=request.user if request.user.is_authenticated else None,
             )
-            .values_list("name", flat=True)
-            .distinct()
-        )
-        suburbs = list(suburbs_qs)
 
-        SuburbSearchLog.objects.create(
-            query=query,
-            normalized_query=normalized_query,
-            result_count=len(suburbs),
-            had_results=bool(suburbs),
-            user=request.user if request.user.is_authenticated else None,
-        )
-
-        return Response({"suburbs": list(suburbs)}, status=status.HTTP_200_OK)
+        return Response({"suburbs": suburbs}, status=status.HTTP_200_OK)
