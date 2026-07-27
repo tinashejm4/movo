@@ -11,3 +11,6 @@ psycopg2-binary
 gunicorn
 mssql-django
 psycopg2
+channels
+channels_redis
+daphne

@@ -16,8 +16,9 @@ assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packa
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
 dropoff_verify = DeliveryViewSet.as_view({"post": "dropoff_verify"})
 cancel_order = DeliveryViewSet.as_view({"post": "cancel_order"})
-invoice_details = InvoiceViewSet.as_view({"get": "invoice_details"})
 is_biker_assigned = DeliveryViewSet.as_view({"get": "is_biker_assigned"})
+
+invoice_details = InvoiceViewSet.as_view({"get": "invoice_details"})
 
 ecocash_payment = PaymentViewSet.as_view({"post": "ecocash_payment"})
 ecocash_notify = PaymentViewSet.as_view({"post": "ecocash_notify"})
@@ -58,16 +59,6 @@ urlpatterns = [
         "assign-pending-packages/",
         assign_pending_packages,
         name="intracity_assign_pending_packages",
-    ),
-    path(
-        "pickup-verify/",
-        pickup_verify,
-        name="intracity_pickup_verify",
-    ),
-    path(
-        "dropoff-verify/",
-        dropoff_verify,
-        name="intracity_dropoff_verify",
     ),
     path("cancel-order/", 
          cancel_order, 

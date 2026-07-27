@@ -353,25 +353,27 @@ class PackageViewSet(ViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+        address_char_len = 25
+
         # message to receiver
         if package.is_sender_initiated:
             address = package.dropoff_address
-            if len(address) > 20:
-                address = address[:20] + "..."
+            if len(address) > address_char_len:
+                address = address[:address_char_len] + "..."
             sender = package.sender.user
             sender_name = sender.first_name + " " + sender.last_name
-            message = f"""You have a package from {sender_name} to {address}. Collection OTP: {package.receiver_code}. Tracking No: {package.slug}."""
+            message = f"""Incoming package from {sender_name} to you @{address}. Collection OTP: {package.receiver_code}. Tracking No: {package.slug}."""
             if invoice.is_pay_forward:
                 message = " ".join([message, f"Amount Due on Delivery: ${invoice.amount:.2f}"])
             else:
                 message = " ".join([message, "Please be ready to receive your delivery."])
         else:
             address = package.pickup_address
-            if len(address) > 20:
-                address = address[:20] + "..."
+            if len(address) > address_char_len:
+                address = address[:address_char_len] + "..."
             receiver = package.receiver.user
             receiver_name = receiver.first_name + " " + receiver.last_name
-            message = f"""A package for {receiver_name} has been booked from {address}. Collection OTP: {package.sender_code}. Tracking No: {package.slug}."""
+            message = f"""A package for {receiver_name} has been booked from you @{address}. Collection OTP: {package.sender_code}. Tracking No: {package.slug}."""
             if not invoice.is_pay_forward:
                 message = " ".join([message, f"Amount Due on Collection: ${invoice.amount:.2f}"])
             else:

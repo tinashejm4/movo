@@ -17,8 +17,17 @@ services:
       DB_PASSWORD: movo_password
       DB_HOST: db
       DB_PORT: "5432"
+      CHANNEL_REDIS_HOST: redis
+      CHANNEL_REDIS_PORT: "6379"
+      CHANNEL_REDIS_SOCKET_TIMEOUT: "15"
+      CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT: "15"
+      CHANNEL_REDIS_HEALTH_CHECK_INTERVAL: "30"
+      CHANNEL_REDIS_RETRY_ON_TIMEOUT: "1"
     depends_on:
-      - db
+      db:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   db:
     image: postgres:15
@@ -31,6 +40,17 @@ services:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data/
+
+  redis:
+    image: redis:7-alpine
+    container_name: movo_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   postgres_data:

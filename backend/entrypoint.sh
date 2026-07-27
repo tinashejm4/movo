@@ -16,6 +16,6 @@ if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ] && [ "$D
     --email "$DJANGO_SUPERUSER_EMAIL" || true
 fi
 
-# Start Django’s dev server, binding to Azure’s $PORT
-echo "Starting Django runserver on port ${PORT:-8000}..."
-exec python manage.py runserver 0.0.0.0:${PORT:-8000}
+# Start ASGI server so websocket routes are available.
+echo "Starting Daphne on port ${PORT:-8000}..."
+exec daphne -b 0.0.0.0 -p ${PORT:-8000} Movo.asgi:application

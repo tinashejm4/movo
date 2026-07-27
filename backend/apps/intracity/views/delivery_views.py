@@ -2,6 +2,8 @@ from django.db import transaction
 from django.db.models import OuterRef, Subquery, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -14,10 +16,6 @@ import logging
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
     DeliveryErrorResponseSerializer,
-    PickupVerificationRequestSerializer,
-    PickupVerificationResponseSerializer,
-    DropoffVerificationRequestSerializer,
-    DropoffVerificationResponseSerializer,
     CancelOrderRequestSerializer,
     CancelOrderResponseSerializer,
     IsBikerAssignedRequestSerializer,
@@ -37,37 +35,33 @@ class DeliveryViewSet(ViewSet):
             200: AssignPendingPackagesResponseSerializer,
             400: OpenApiResponse(
                 DeliveryErrorResponseSerializer,
-                description="Incorrect request parameters",
+                description="No pending packages or no available bikers",
             ),
         },
     )
-
     @transaction.atomic
     def assign_pending_packages(self, request):
+
+
+
+        
         latest_status = (
             PackageStatus.objects.filter(package=OuterRef("pk"))
             .order_by("-updated_at")
             .values("status")[:1]
         )
-
+        today = timezone.now().date()
         pending_packages = list(
-            Package.objects.filter(biker__isnull=True)
+            Package.objects.filter(biker__isnull=True, added_at__date=today)
             .annotate(current_status=Subquery(latest_status))
             .filter(current_status="Pending")
             .order_by("-is_fast_delivery", "added_at")
         )
 
         if not pending_packages:
-            serializer = AssignPendingPackagesResponseSerializer(
-                {
-                    "message": "No pending packages available for assignment",
-                    "assigned_count": 0,
-                    "unassigned_count": 0,
-                    "assigned_packages": [],
-                }
-            )
+            logger.info("assign_pending_packages: no pending packages found")
             return Response(
-                serializer.data,
+                {"message": "No pending packages available for assignment"},
                 status=status.HTTP_200_OK,
             )
 
@@ -83,249 +77,65 @@ class DeliveryViewSet(ViewSet):
                 free_bikers.append(biker)
 
         if not free_bikers:
-            serializer = AssignPendingPackagesResponseSerializer(
-                {
-                    "message": "No free riders available",
-                    "assigned_count": 0,
-                    "unassigned_count": len(pending_packages),
-                    "assigned_packages": [],
-                }
-            )
+            logger.info("assign_pending_packages: no available bikers")
             return Response(
-                serializer.data,
+                {"message": "No available bikers for assignment"},
                 status=status.HTTP_200_OK,
             )
 
         assignments = []
+        channel_layer = get_channel_layer()
+
         for package, biker in zip(pending_packages, free_bikers):
             package.biker = biker
             package.assigned_at = timezone.now()
             package.save(update_fields=["biker", "assigned_at"])
-            assignments.append(
-                {
-                    "package_id": package.id,
-                    "is_fast_delivery": package.is_fast_delivery,
-                    "assigned_biker_id": biker.id,
-                    "assigned_biker_name": f"{biker.user.first_name} {biker.user.last_name}".strip(),
-                    "assigned_at": package.assigned_at,
-                    "added_at": package.added_at,
-                }
-            )
 
-        serializer = AssignPendingPackagesResponseSerializer(
-            {
-                "message": "Pending packages assigned successfully",
-                "assigned_count": len(assignments),
-                "unassigned_count": len(pending_packages) - len(assignments),
-                "assigned_packages": assignments,
-            }
-        )
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
-
-    @extend_schema(
-        tags=["intracity/Delivery"],
-        request=PickupVerificationRequestSerializer,
-        responses={
-            200: PickupVerificationResponseSerializer,
-            400: OpenApiResponse(
-                DeliveryErrorResponseSerializer,
-                description="Incorrect request parameters",
-            ),
-            403: OpenApiResponse(
-                DeliveryErrorResponseSerializer,
-                description="User is not assigned to this package",
-            ),
-        },
-    )
-
-    @transaction.atomic
-    def pickup_verify(self, request):
-        serializer = PickupVerificationRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=False)
-        data = serializer.initial_data
-        package_id = data.get("package_id")
-        sender_code = (data.get("sender_code") or "").strip()
-
-        if not package_id or not sender_code:
-            return Response(
-                {"error": "package_id and sender_code are required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        package = get_object_or_404(
-            Package.objects.select_related("biker__user"), id=package_id
-        )
-        if not package.biker:
-            return Response(
-                {"error": "Package has not been assigned to a biker yet"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.biker.user_id != request.user.id:
-            return Response(
-                {"error": "You are not assigned to this package"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        latest_status = (
-            PackageStatus.objects.filter(package=package)
-            .order_by("-updated_at")
-            .first()
-        )
-        if latest_status and latest_status.status == "Delivered":
-            return Response(
-                {"error": "Package is already delivered"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.sender_code != sender_code:
-            return Response(
-                {"error": "Invalid sender code"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        sale_error = self.record_cash_sale(package, stage="pickup")
-        if sale_error:
-            return sale_error
-        PackageStatus.objects.create(package=package, status="In Transit")
-
-        serializer = PickupVerificationResponseSerializer(
-            {
-                "message": "Package collected successfully",
+            assignment_payload = {
                 "package_id": package.id,
-                "status": "In Transit",
+                "slug": package.slug,
+                "is_fast_delivery": package.is_fast_delivery,
+                "biker_id": biker.id,
+                "biker_name": f"{biker.user.first_name} {biker.user.last_name}".strip(),
+                "biker_phone": f"0{biker.user.username}",
+                "assigned_at": package.assigned_at.isoformat()
+                if package.assigned_at
+                else None,
+                "added_at": package.added_at.isoformat() if package.added_at else None,
             }
-        )
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
+            assignments.append(assignment_payload)
 
-    @staticmethod
-    def record_cash_sale(package, stage):
-        invoice = Invoice.objects.filter(package=package).first()
-        if not invoice:
-            return None
+            if channel_layer:
+                try:
+                    logger.info(
+                        "assign_pending_packages: publishing package_id=%s biker_id=%s",
+                        package.id,
+                        biker.id,
+                    )
+                    async_to_sync(channel_layer.group_send)(
+                        "package_assignments",
+                        {"type": "package.assigned", "payload": assignment_payload},
+                    )
+                    async_to_sync(channel_layer.group_send)(
+                        f"package_{package.id}",
+                        {"type": "package.assigned", "payload": assignment_payload},
+                    )
+                except Exception as exc:
+                    logger.warning("WebSocket publish skipped: %s", exc)
 
-        if invoice.is_paid:
-            return None
-
-        # Pay-forward means payment is expected at dropoff; otherwise at pickup.
-        if stage == "pickup" and invoice.is_pay_forward:
-            return None
-        if stage == "dropoff" and not invoice.is_pay_forward:
-            return None
-
-        account = Account.objects.filter(owner=package.biker.user).first()
-        if not account:
-            return Response(
-                {"error": "Account not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        IntracitySale.objects.get_or_create(
-            invoice=invoice,
-            defaults={
-                "account": account,
-                "amount": float(invoice.amount),
-            },
+        logger.info(
+            "assign_pending_packages: assigned_count=%s unassigned_count=%s",
+            len(assignments),
+            max(len(pending_packages) - len(assignments), 0),
         )
 
-        invoice.is_paid = True
-        invoice.paid_at = timezone.now()
-        invoice.save(update_fields=["is_paid", "paid_at"])
-        return None
-
-    @extend_schema(
-        tags=["intracity/Delivery"],
-        request=DropoffVerificationRequestSerializer,
-        responses={
-            200: DropoffVerificationResponseSerializer,
-            400: OpenApiResponse(
-                DeliveryErrorResponseSerializer,
-                description="Incorrect request parameters",
-            ),
-            403: OpenApiResponse(
-                DeliveryErrorResponseSerializer,
-                description="User is not assigned to this package",
-            ),
-        },
-    )
-    @transaction.atomic
-    def dropoff_verify(self, request):
-        serializer = DropoffVerificationRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=False)
-        data = serializer.initial_data
-        package_id = data.get("package_id")
-        receiver_code = (data.get("receiver_code") or "").strip()
-
-        if not package_id or not receiver_code:
-            return Response(
-                {"error": "package_id and receiver_code are required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        package = get_object_or_404(
-            Package.objects.select_related("biker__user"), id=package_id
-        )
-        if not package.biker:
-            return Response(
-                {"error": "Package has not been assigned to a biker yet"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.biker.user_id != request.user.id:
-            return Response(
-                {"error": "You are not assigned to this package"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        latest_status = (
-            PackageStatus.objects.filter(package=package)
-            .order_by("-updated_at")
-            .first()
-        )
-        if not latest_status or latest_status.status != "In Transit":
-            return Response(
-                {"error": "Package must be in transit before it can be delivered"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if latest_status.status == "Delivered":
-            return Response(
-                {"error": "Package is already delivered"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.receiver_code != receiver_code:
-            return Response(
-                {"error": "Invalid receiver code"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        sale_error = self.record_cash_sale(package, stage="dropoff")
-        if sale_error:
-            return sale_error
-
-        package.delivered_at = timezone.now()
-        package.save(update_fields=["delivered_at"])
-        PackageStatus.objects.create(package=package, status="Delivered")
-
-        serializer = DropoffVerificationResponseSerializer(
-            {
-                "message": "Package delivered successfully",
-                "package_id": package.id,
-                "status": "Delivered",
-                "delivered_at": package.delivered_at,
-            }
-        )
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
-
+        response_payload = {
+            "message": "Pending packages assigned successfully",
+            "assigned_count": len(assignments),
+            "unassigned_count": max(len(pending_packages) - len(assignments), 0),
+            "assigned_packages": assignments,
+        }
+        return Response(response_payload, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["intracity/Delivery"],

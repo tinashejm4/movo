@@ -32,6 +32,7 @@ app_urlpatterns = [
     path("api/users/", include("apps.users.urls")),
     path("api/intercity/", include("apps.intercity.urls")),
     path("api/intracity/", include("apps.intracity.urls")),
+    path("api/transporters/", include("apps.transporters.urls")),
     path("api/bookkeeping/", include("apps.bookkeeping.urls")),
     path("api/health/", include("apps.health.urls")),
 ]

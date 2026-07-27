@@ -4,7 +4,6 @@ from rest_framework import serializers
 class DeliveryErrorResponseSerializer(serializers.Serializer):
     error = serializers.CharField()
 
-
 class AssignedPackageSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     is_fast_delivery = serializers.BooleanField()
@@ -12,7 +11,6 @@ class AssignedPackageSerializer(serializers.Serializer):
     assigned_biker_name = serializers.CharField(allow_blank=True)
     assigned_at = serializers.DateTimeField()
     added_at = serializers.DateTimeField()
-
 
 class AssignPendingPackagesResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
@@ -24,6 +22,7 @@ class AssignPendingPackagesResponseSerializer(serializers.Serializer):
 class PickupVerificationRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     sender_code = serializers.CharField()
+    account_id = serializers.IntegerField(required=False)
 
 
 class PickupVerificationResponseSerializer(serializers.Serializer):
@@ -35,19 +34,17 @@ class PickupVerificationResponseSerializer(serializers.Serializer):
 class DropoffVerificationRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     receiver_code = serializers.CharField()
+    account_id = serializers.IntegerField(required=False)
 
 
 class DropoffVerificationResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
     package_id = serializers.IntegerField()
     status = serializers.CharField()
-    delivered_at = serializers.DateTimeField()
-
 
 class CancelOrderRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     reason = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-
 
 class CancelOrderResponseSerializer(serializers.Serializer):
     message = serializers.CharField()

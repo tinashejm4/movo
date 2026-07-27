@@ -25,7 +25,7 @@ class Package(models.Model):
     added_at   = models.DateTimeField(auto_now_add = True)
     
     def __str__(self):
-        return f'{self.sender} to {self.receiver}'
+        return f'{self.id} {self.sender} to {self.receiver}'
     
     def generate_unique_slug(self):
         while True:
@@ -52,7 +52,7 @@ class PackageStatus(models.Model):
     updated_at = models.DateTimeField(auto_now_add = True)
     
     def __str__(self):
-        return f'{self.package.creation_code} - {self.status}'
+        return f'{self.status} - {self.package}'
 
 class Invoice(models.Model):
     payment_methods = [

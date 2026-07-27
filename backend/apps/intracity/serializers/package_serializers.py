@@ -8,25 +8,25 @@ class ErrorResponseSerializer(serializers.Serializer):
 class PackageDetailRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     slug = serializers.CharField()
-    receiver_id = serializers.IntegerField()
-    receiver_name = serializers.CharField(allow_blank=True)
     sender_id = serializers.IntegerField()
     sender_name = serializers.CharField(allow_blank=True)
     sender_phone = serializers.CharField(allow_blank=True, required=False)
+    receiver_id = serializers.IntegerField()
+    receiver_name = serializers.CharField(allow_blank=True)
     receiver_phone = serializers.CharField(allow_blank=True, required=False)
-    pickup_address = serializers.CharField()
-    dropoff_address = serializers.CharField()
     pickup_area = serializers.IntegerField(allow_null=True, required=False)
+    pickup_address = serializers.CharField()
     dropoff_area = serializers.IntegerField(allow_null=True, required=False)
+    dropoff_address = serializers.CharField()
     city = serializers.CharField()
-    receiver_code = serializers.CharField()
     sender_code = serializers.CharField()
+    receiver_code = serializers.CharField()
     comments = serializers.CharField(allow_null=True, allow_blank=True)
     is_fast_delivery = serializers.BooleanField()
     is_sender_initiated = serializers.BooleanField()
     package_created_at = serializers.DateTimeField()
-    driver_name = serializers.CharField(allow_null=True, allow_blank=True)
     driver_id = serializers.IntegerField(allow_null=True, required=False)
+    driver_name = serializers.CharField(allow_null=True, allow_blank=True)
     driver_assigned_at = serializers.DateTimeField(allow_null=True)
     invoice_id = serializers.IntegerField(allow_null=True, required=False)
     invoice_amount = serializers.DecimalField(
@@ -42,10 +42,8 @@ class PackageDetailRequestSerializer(serializers.Serializer):
     is_delivered = serializers.BooleanField()
     delivered_at = serializers.DateTimeField(allow_null=True)
 
-
 PackageRequestSerializer = PackageDetailRequestSerializer
 PackageDetailSerializer = PackageDetailRequestSerializer
-
 
 class PackageListSerializer(serializers.Serializer):
     count = serializers.IntegerField()
