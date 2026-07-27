@@ -51,6 +51,7 @@ ALLOWED_HOSTS = [
 
 INSTALLED_APPS = [
     #! Django default apps
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -61,12 +62,15 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
+    "channels",
     "corsheaders",
     #! Local apps
     "apps.users.apps.UsersConfig",
     "apps.intercity.apps.IntercityConfig",
     "apps.intracity.apps.IntracityConfig",
     "apps.bookkeeping.apps.BookkeepingConfig",
+    "apps.transporters.apps.TransportersConfig",
     "apps.health.apps.HealthConfig",
 ]
 
@@ -81,12 +85,16 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
 ]
 
+ASGI_APPLICATION = "Movo.asgi.application"
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo.co.zw",
+]
+
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Next.js dev server
-    "http://localhost:54404",
-    "http://localhost:43766",
-    "http://localhost:59837",
-    "http://localhost:8080",  # Vue or Flutter web
+    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo.co.zw",
 ]
 
 REST_FRAMEWORK = {
@@ -126,20 +134,77 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "Movo.wsgi.application"
+ASGI_APPLICATION = "Movo.asgi.application"
+
+# CHANNEL_LAYERS = {
+#     "default": {
+#         "BACKEND": "channels.layers.InMemoryChannelLayer",
+#     }
+# }
+
+USE_INMEMORY_CHANNEL_LAYER = (
+    os.environ.get("USE_INMEMORY_CHANNEL_LAYER", "0") == "1"
+)
+
+CHANNEL_REDIS_HOST = os.environ.get("CHANNEL_REDIS_HOST", "127.0.0.1")
+CHANNEL_REDIS_PORT = int(os.environ.get("CHANNEL_REDIS_PORT", "6379"))
+CHANNEL_REDIS_URL = os.environ.get(
+    "CHANNEL_REDIS_URL", f"redis://{CHANNEL_REDIS_HOST}:{CHANNEL_REDIS_PORT}/0"
+)
+CHANNEL_REDIS_SOCKET_TIMEOUT = float(
+    os.environ.get("CHANNEL_REDIS_SOCKET_TIMEOUT", "15")
+)
+CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT = float(
+    os.environ.get("CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT", "15")
+)
+CHANNEL_REDIS_HEALTH_CHECK_INTERVAL = int(
+    os.environ.get("CHANNEL_REDIS_HEALTH_CHECK_INTERVAL", "30")
+)
+CHANNEL_REDIS_RETRY_ON_TIMEOUT = (
+    os.environ.get("CHANNEL_REDIS_RETRY_ON_TIMEOUT", "1") == "1"
+)
+
+if USE_INMEMORY_CHANNEL_LAYER:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [
+                    {
+                        "address": CHANNEL_REDIS_URL,
+                        "socket_timeout": CHANNEL_REDIS_SOCKET_TIMEOUT,
+                        "socket_connect_timeout": CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT,
+                        "health_check_interval": CHANNEL_REDIS_HEALTH_CHECK_INTERVAL,
+                        "retry_on_timeout": CHANNEL_REDIS_RETRY_ON_TIMEOUT,
+                    }
+                ]
+            },
+        },
+    }
 
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 if os.environ.get("DB_HOST"):
+    db_sslmode = os.environ.get("DB_SSLMODE")
+    db_options = {"sslmode": db_sslmode} if db_sslmode else {}
+
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends.postgresql",
+            "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
             "NAME": os.environ.get("DB_NAME", "movo_db"),
             "USER": os.environ.get("DB_USER", "movo_user"),
             "PASSWORD": os.environ.get("DB_PASSWORD", "movo_password"),
             "HOST": os.environ.get("DB_HOST", "db"),
             "PORT": os.environ.get("DB_PORT", "5432"),
+            "OPTIONS": db_options,
         }
     }
 else:
@@ -188,7 +253,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 
 TXTCONSOLE_SEND_OTP = os.environ.get("TXTCONSOLE_SEND_OTP", "0") == "1"
 TXTCONSOLE_BASE_URL = os.environ.get("TXTCONSOLE_BASE_URL", "https://api.txtconsole.com/v1")

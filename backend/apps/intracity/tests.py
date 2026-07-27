@@ -384,3 +384,47 @@ class IntracityCancelOrderTests(APITestCase):
 		)
 
 		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class IntracityPackageStatusTests(APITestCase):
+	def setUp(self):
+		self.city = City.objects.create(name="Harare", province="Harare", country="Zimbabwe")
+		self.user = User.objects.create_user(username="status-user", password="pass")
+		self.client.force_authenticate(user=self.user)
+		self.user_customer = Customer.objects.create(user=self.user)
+
+		sender_user = User.objects.create_user(username="0711000001", password="pass")
+		receiver_user = User.objects.create_user(username="0711000002", password="pass")
+		sender = Customer.objects.create(user=sender_user)
+		receiver = Customer.objects.create(user=receiver_user)
+
+		self.package = Package.objects.create(
+			sender=sender,
+			receiver=receiver,
+			city=self.city,
+			pickup_address="A",
+			dropoff_address="B",
+			sender_code="123123",
+			receiver_code="456456",
+		)
+		self.package.sender = self.user_customer
+		self.package.save(update_fields=["sender"])
+		PackageStatus.objects.create(package=self.package, status="Pending")
+		PackageStatus.objects.create(package=self.package, status="In Transit")
+
+	def test_current_status_returns_latest_status(self):
+		response = self.client.get(
+			reverse("intracity_package_status"),
+			{"package_id": self.package.id},
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["package_id"], self.package.id)
+		self.assertEqual(response.data["status"], "In Transit")
+		self.assertTrue(response.data["is_active"])
+		self.assertTrue(response.data["is_collected"])
+		self.assertFalse(response.data["is_delivered"])
+
+	def test_current_status_requires_package_id(self):
+		response = self.client.get(reverse("intracity_package_status"))
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
