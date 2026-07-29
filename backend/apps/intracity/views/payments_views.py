@@ -47,6 +47,15 @@ class PaymentViewSet(ViewSet):
     def _is_econet_number(phone_number):
         return phone_number[4] == "7" or phone_number[4] == "8"
 
+    @staticmethod
+    def _to_json_safe(value):
+        """Return a log-safe representation without letting logging break callbacks."""
+        if isinstance(value, dict):
+            return {str(key): PaymentViewSet._to_json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [PaymentViewSet._to_json_safe(item) for item in value]
+        return str(value) if not isinstance(value, (str, int, float, bool, type(None))) else value
+
     @extend_schema(
         tags=["intracity/Payments"],
         request=EcocashPaymentRequestSerializer,
