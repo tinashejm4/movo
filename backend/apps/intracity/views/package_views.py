@@ -1,19 +1,10 @@
-import math
-import random
-import string
-from django.conf import settings
-import requests, base64, logging
-from django.contrib.auth.models import User
-from django.db import transaction
 from django.db.models import OuterRef, Q, Subquery
-from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
-from apps.users.models import City, Contact, Customer, Suburb
-from apps.bookkeeping.models import ExchangeRate
+from apps.users.models import Suburb
 from ..serializers.package_serializers import (
     CurrentPackageStatusSerializer,
     ErrorResponseSerializer,
@@ -26,12 +17,18 @@ from ..serializers.package_serializers import (
     SuburbSearchQuerySerializer,
     SuburbSearchResponseSerializer,
 )
-from ..models import Package, PackageStatus, Invoice, Price, SuburbSearchLog
-from ..services.package_assignment import assign_pending_packages_safely
+from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
+from ..services.create_package import (
+    PackageCreationNotFound,
+    create_package as create_package_service,
+)
+from ..services.package_pricing import (
+    PackagePricingError,
+    PackagePricingNotFound,
+    calculate_package_price,
+)
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
-from apps.users.utils import normalize_zimbabwean_number, is_valid_zimbabwean_number
-
-logger = logging.getLogger(__name__)
+from apps.users.utils import is_valid_zimbabwean_number
 
 
 class PackageListPagination(PageNumberPagination):
@@ -255,7 +252,6 @@ class PackageViewSet(ViewSet):
             ),
         },
     )
-    @transaction.atomic
     def create_package(self, request):
         if not request.user.is_authenticated:
             return Response(
@@ -270,13 +266,6 @@ class PackageViewSet(ViewSet):
         counterpart_name = data.get("name")
         pickup_address = data.get("pickup_location")
         dropoff_address = data.get("dropoff_location")
-        pickup_area_id = data.get("pickup_area_id")
-        dropoff_area_id = data.get("dropoff_area_id")
-        comments = data.get("comments")
-        amount = data.get("amount")
-        is_fast_delivery = bool(data.get("is_fast_delivery", False))
-        is_pay_forward = bool(data.get("is_pay_forward", False))
-        is_sender_initiated = bool(data.get("is_sender_initiated", True))
 
         required_fields = {
             "phone": counterpart_phone,
@@ -293,176 +282,28 @@ class PackageViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not is_valid_zimbabwean_number:
+        if not is_valid_zimbabwean_number(counterpart_phone):
             return Response(
                 {"error": f"Phone number format is incorrect: {counterpart_phone}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invoice_amount = amount
-        counterpart = self.resolve_customer(counterpart_phone, counterpart_name)
-        city = City.objects.first()  # Assuming a single city for now; adjust as needed
+        try:
+            package, invoice = create_package_service(user=request.user, data=data)
+        except PackageCreationNotFound as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        if is_sender_initiated:
-            sender = Customer.objects.get(user=request.user)
-            receiver = counterpart
-        else:
-            sender = counterpart
-            receiver = Customer.objects.get(user=request.user)
-
-        pickup_area = get_object_or_404(Suburb, id=pickup_area_id)
-        dropoff_area = get_object_or_404(Suburb, id=dropoff_area_id)
-
-        package = Package.objects.create(
-            sender=sender,
-            receiver=receiver,
-            is_sender_initiated=is_sender_initiated,
-            city=city,
-            is_fast_delivery=is_fast_delivery,
-            pickup_area=pickup_area,
-            pickup_address=pickup_address,
-            dropoff_area=dropoff_area,
-            dropoff_address=dropoff_address,
-            receiver_code=self.generate_code(),
-            sender_code=self.generate_code(),
-            comments=comments,
-        )
-
-        PackageStatus.objects.create(package=package, status="Pending")
-        invoice = Invoice.objects.create(
-            package=package,
-            amount=invoice_amount,
-            is_pay_forward=is_pay_forward,
-            is_paid=False,
-            exchange_rate=ExchangeRate.objects.last(),
-        )
-
-        self.send_receiver_sms(counterpart_phone, package, invoice)
         status_records = list(
             PackageStatus.objects.filter(package=package).order_by("updated_at")
         )
-        transaction.on_commit(assign_pending_packages_safely)
 
         return Response(
             self.build_package_payload(package, invoice, status_records),
             status=status.HTTP_201_CREATED,
         )
-
-    def send_receiver_sms(self, phone_number, package, invoice):
-        if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
-            return Response(
-                {"error": "SMS provider credentials are missing"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        address_char_len = 25
-
-        # message to receiver
-        if package.is_sender_initiated:
-            address = package.dropoff_address
-            if len(address) > address_char_len:
-                address = address[:address_char_len] + "..."
-            sender = package.sender.user
-            sender_name = sender.first_name + " " + sender.last_name
-            message = f"""Incoming package from {sender_name} to you @{address}. Collection OTP: {package.receiver_code}. Tracking No: {package.slug}."""
-            if invoice.is_pay_forward:
-                message = " ".join([message, f"Amount Due on Delivery: ${invoice.amount:.2f}"])
-            else:
-                message = " ".join([message, "Please be ready to receive your delivery."])
-        else:
-            address = package.pickup_address
-            if len(address) > address_char_len:
-                address = address[:address_char_len] + "..."
-            receiver = package.receiver.user
-            receiver_name = receiver.first_name + " " + receiver.last_name
-            message = f"""A package for {receiver_name} has been booked from you @{address}. Collection OTP: {package.sender_code}. Tracking No: {package.slug}."""
-            if not invoice.is_pay_forward:
-                message = " ".join([message, f"Amount Due on Collection: ${invoice.amount:.2f}"])
-            else:
-                message = " ".join([message, "Please prepare the package for collection."])
-
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "authorization": "Basic "
-            + base64.b64encode(
-                f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()
-            ).decode(),
-        }
-
-        payload = {
-            "destination": f"263{normalize_zimbabwean_number(phone_number)}",
-            "text": message,
-            "source": settings.TXTCONSOLE_SOURCE,
-        }
-
-        if settings.TXTCONSOLE_RECEIPT_URL:
-            payload["receiptURL"] = settings.TXTCONSOLE_RECEIPT_URL
-
-        try:
-            provider_response = requests.post(
-                settings.TXTCONSOLE_SMS_URL + "/sms",
-                json=payload,
-                headers=headers,
-                timeout=20,
-            )
-
-            if provider_response.status_code >= 400:
-                try:
-                    error_details = provider_response.json()
-                except ValueError:
-                    error_details = {"message": provider_response.text}
-                    logger.warning(
-                        "txtConsole OTP send failed for package %s: %s",
-                        package.slug,
-                        error_details,
-                    )
-                    return Response(
-                        {"error": "Failed to send OTP SMS"},
-                        status=status.HTTP_502_BAD_GATEWAY,
-                    )
-        except requests.RequestException as exc:
-            logger.exception(
-                "txtConsole OTP send exception for package %s", package.slug
-            )
-            return Response(
-                {"error": "SMS provider request failed"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-    def resolve_customer(self, phone_number, full_name=None):
-        customer_default_password = "Pass@123"
-        phone_number = normalize_zimbabwean_number(phone_number)
-
-        if User.objects.filter(username=phone_number).exists():
-            user = User.objects.get(username=phone_number)
-        else:
-            first_name, last_name = self.split_name(full_name, phone_number)
-            user = User.objects.create_user(
-                username=phone_number,
-                password=customer_default_password,
-                first_name=first_name.capitalize(),
-                last_name=last_name.capitalize(),
-            )
-
-        Contact.objects.get_or_create(
-            user=user, defaults={"phone_number": phone_number}
-        )
-        customer, _ = Customer.objects.get_or_create(user=user)
-        return customer
-
-    def split_name(self, full_name, fallback_name):
-        name = (full_name or fallback_name or "Unknown").strip()
-        parts = name.split()
-        first_name = parts[0] if parts else "Unknown"
-        last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
-        return first_name, last_name
-
-    def generate_code(self):
-        while True:
-            code = "".join(random.choices(string.digits, k=6))
-            if not Package.objects.filter(receiver_code=code).exists():
-                return code
 
     def build_package_payload(self, package, invoice=None, status_records=None):
         if status_records is None:
@@ -535,7 +376,6 @@ class PackageViewSet(ViewSet):
             ),
         },
     )
-    @transaction.atomic
     def package_price(self, request):
         serializer = PackagePriceRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=False)
@@ -544,69 +384,28 @@ class PackageViewSet(ViewSet):
         from_suburb_id = data.get("from_suburb_id")
         to_suburb_id = data.get("to_suburb_id")
 
-        from_suburb = get_object_or_404(Suburb, id=from_suburb_id)
-        to_suburb = get_object_or_404(Suburb, id=to_suburb_id)
-
-        distance_km = from_suburb.distance_to(to_suburb)
-
         is_fast_delivery_raw = data.get("is_fast_delivery", False)
         city_id = data.get("city_id")
 
-        if distance_km is None:
-            return Response(
-                {"error": "distance_km is required"}, status=status.HTTP_400_BAD_REQUEST
+        try:
+            price_result = calculate_package_price(
+                from_suburb_id=from_suburb_id,
+                to_suburb_id=to_suburb_id,
+                city_id=city_id,
+                is_fast_delivery=is_fast_delivery_raw,
             )
-
-        if distance_km < 0:
+        except PackagePricingNotFound as exc:
             return Response(
-                {"error": "distance_km must be zero or positive"},
+                {"error": str(exc)},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except PackagePricingError as exc:
+            return Response(
+                {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if isinstance(is_fast_delivery_raw, str):
-            is_fast_delivery = is_fast_delivery_raw.strip().lower() == "true"
-        else:
-            is_fast_delivery = bool(is_fast_delivery_raw)
-
-        if city_id:
-            city = City.objects.filter(id=city_id).first()
-            if not city:
-                return Response(
-                    {"error": "city not found"}, status=status.HTTP_404_NOT_FOUND
-                )
-        else:
-            city = City.objects.first()
-
-        if not city:
-            return Response(
-                {"error": "No city configured"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        price = Price.objects.filter(city=city).last()
-        if not price:
-            return Response(
-                {"error": "No pricing configured for this city"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        amount = float(price.base_price) + (float(price.rate_per_km) * distance_km)
-        if is_fast_delivery:
-            amount *= float(price.fast_delivery_multiplier)
-
-        decimal_part = amount - math.floor(amount)
-        if decimal_part > 0.40:
-            amount = math.ceil(amount)  # round up
-        else:
-            amount = math.floor(amount)
-
-        serializer = PackagePriceResponseSerializer(
-            {
-                "city_id": city.id,
-                "distance_km": distance_km,
-                "is_fast_delivery": is_fast_delivery,
-                "amount": amount,
-            }
-        )
+        serializer = PackagePriceResponseSerializer(price_result)
         return Response(
             serializer.data,
             status=status.HTTP_200_OK,

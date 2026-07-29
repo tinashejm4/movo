@@ -42,10 +42,10 @@ class AutomaticPackageAssignmentTests(APITestCase):
         "apps.intracity.services.package_assignment._publish_assignments"
     )
     @patch(
-        "apps.intracity.views.package_views.PackageViewSet.send_receiver_sms"
+        "apps.intracity.services.create_package.send_package_booking_sms"
     )
     @patch(
-        "apps.intracity.views.package_views.assign_pending_packages_safely",
+        "apps.intracity.services.create_package.assign_pending_packages_safely",
         side_effect=assign_pending_packages,
     )
     def test_create_package_assigns_available_biker_after_commit(
