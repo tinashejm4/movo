@@ -14,7 +14,6 @@ from ..serializers.package_serializers import (
     PackageCreateSerializer,
     PackagePriceRequestSerializer,
     PackagePriceResponseSerializer,
-    SuburbSearchQuerySerializer,
     SuburbSearchResponseSerializer,
 )
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
@@ -74,7 +73,9 @@ class PackageViewSet(ViewSet):
             )
 
         package = (
-            Package.objects.select_related("sender__user", "receiver__user", "biker__user")
+            Package.objects.select_related(
+                "sender__user", "receiver__user", "biker__user"
+            )
             .filter(id=package_id)
             .filter(
                 Q(sender__user=request.user)
@@ -105,6 +106,9 @@ class PackageViewSet(ViewSet):
         payload = {
             "package_id": package.id,
             "slug": package.slug,
+            "driver_number": (
+                self.get_phone_number(package.biker.user) if package.biker else None
+            ),
             "status": latest_status.status if latest_status else "Pending",
             "status_updated_at": latest_status.updated_at if latest_status else None,
             "is_active": (latest_status.status if latest_status else "Pending")
@@ -194,9 +198,9 @@ class PackageViewSet(ViewSet):
         for status_record in PackageStatus.objects.filter(
             package_id__in=package_ids
         ).order_by("updated_at"):
-            status_records_by_package_id.setdefault(status_record.package_id, []).append(
-                status_record
-            )
+            status_records_by_package_id.setdefault(
+                status_record.package_id, []
+            ).append(status_record)
 
         response_data = [
             self.build_package_payload(
@@ -229,7 +233,8 @@ class PackageViewSet(ViewSet):
         package = Package.objects.filter(id=package_id).first()
         if not package:
             return Response(
-                {"error": f"Package not found for id {package_id}"}, status=status.HTTP_404_NOT_FOUND
+                {"error": f"Package not found for id {package_id}"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         invoice = Invoice.objects.filter(package=package).first()
@@ -340,6 +345,9 @@ class PackageViewSet(ViewSet):
                     if package.biker
                     else None
                 ),
+                "driver_number": (
+                    self.get_phone_number(package.biker.user) if package.biker else None
+                ),
                 "receiver_code": package.receiver_code,
                 "sender_code": package.sender_code,
                 "comments": package.comments,
@@ -411,8 +419,6 @@ class PackageViewSet(ViewSet):
             status=status.HTTP_200_OK,
         )
 
-
-
     @extend_schema(
         tags=["intracity/Packages"],
         request=None,
@@ -436,15 +442,12 @@ class PackageViewSet(ViewSet):
             ),
         },
     )
-
     @extend_schema(
         tags=["intracity/Packages"],
         parameters=[
             OpenApiParameter(
                 name="query",
-                description=(
-                    "Search by suburb name."
-                ),
+                description=("Search by suburb name."),
                 required=False,
                 type=str,
             ),
@@ -465,7 +468,9 @@ class PackageViewSet(ViewSet):
     )
     def search_suburb(self, request):
         query = request.query_params.get("query", "").strip()
-        city_id = request.query_params.get("city_id") or request.query_params.get("city")
+        city_id = request.query_params.get("city_id") or request.query_params.get(
+            "city"
+        )
         if not query:
             return Response(
                 {"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST
@@ -476,9 +481,7 @@ class PackageViewSet(ViewSet):
         if city_id:
             suburbs_qs = suburbs_qs.filter(city__id=city_id)
 
-        suburbs = list(
-            suburbs_qs.order_by("name").values("id", "name").distinct()
-        )
+        suburbs = list(suburbs_qs.order_by("name").values("id", "name").distinct())
 
         if len(query) > 2:
             SuburbSearchLog.objects.create(

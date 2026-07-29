@@ -27,6 +27,7 @@ class PackageDetailRequestSerializer(serializers.Serializer):
     package_created_at = serializers.DateTimeField()
     driver_id = serializers.IntegerField(allow_null=True, required=False)
     driver_name = serializers.CharField(allow_null=True, allow_blank=True)
+    driver_number = serializers.CharField(allow_null=True, allow_blank=True)
     driver_assigned_at = serializers.DateTimeField(allow_null=True)
     invoice_id = serializers.IntegerField(allow_null=True, required=False)
     invoice_amount = serializers.DecimalField(
@@ -42,8 +43,10 @@ class PackageDetailRequestSerializer(serializers.Serializer):
     is_delivered = serializers.BooleanField()
     delivered_at = serializers.DateTimeField(allow_null=True)
 
+
 PackageRequestSerializer = PackageDetailRequestSerializer
 PackageDetailSerializer = PackageDetailRequestSerializer
+
 
 class PackageListSerializer(serializers.Serializer):
     count = serializers.IntegerField()
@@ -59,6 +62,7 @@ class PackageDetailQuerySerializer(serializers.Serializer):
 class CurrentPackageStatusSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     slug = serializers.CharField()
+    driver_number = serializers.CharField(allow_null=True, allow_blank=True)
     status = serializers.CharField()
     status_updated_at = serializers.DateTimeField(allow_null=True)
     is_active = serializers.BooleanField()
