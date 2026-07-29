@@ -17,6 +17,8 @@ from apps.bookkeeping.models import ExchangeRate
 from ..serializers.package_serializers import (
     CurrentPackageStatusSerializer,
     ErrorResponseSerializer,
+    PackageContactsQuerySerializer,
+    PackageContactsResponseSerializer,
     PackageDetailQuerySerializer,
     PackageDetailSerializer,
     PackageListSerializer,
@@ -48,11 +50,86 @@ class PackageViewSet(ViewSet):
             "list_packages",
             "package_detail",
             "current_status",
+            "get_contacts",
         }:
             return [IsAuthenticated()]
         if self.action in {"package_price", "search_suburb"}:
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    @extend_schema(
+        tags=["intracity/Packages"],
+        parameters=[PackageContactsQuerySerializer],
+        responses={
+            200: PackageContactsResponseSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="is_sending is required"
+            ),
+        },
+    )
+    def get_contacts(self, request):
+        is_sending_param = request.query_params.get("is_sending")
+        if is_sending_param is None:
+            return Response(
+                {"error": "is_sending query parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_sending = is_sending_param.lower() in ("true", "1")
+        customer = getattr(request.user, "customer", None)
+        if not customer:
+            return Response({"contacts": []}, status=status.HTTP_200_OK)
+
+        LIMIT = 15
+
+        if is_sending:
+            # User is sending — return 15 most recently contacted distinct receivers
+            packages = (
+                Package.objects.filter(sender=customer)
+                .select_related("receiver__user")
+                .order_by("-added_at")
+            )
+            seen = set()
+            contacts = []
+            for p in packages:
+                uid = p.receiver_id
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                contacts.append(
+                    {
+                        "id": p.receiver.user.id,
+                        "name": f"{p.receiver.user.first_name} {p.receiver.user.last_name}".strip(),
+                        "phone": f"0{p.receiver.user.username}",
+                    }
+                )
+                if len(contacts) == LIMIT:
+                    break
+        else:
+            # User is receiving — return 15 most recently sent-from distinct senders
+            packages = (
+                Package.objects.filter(receiver=customer)
+                .select_related("sender__user")
+                .order_by("-added_at")
+            )
+            seen = set()
+            contacts = []
+            for p in packages:
+                uid = p.sender_id
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                contacts.append(
+                    {
+                        "id": p.sender.user.id,
+                        "name": f"{p.sender.user.first_name} {p.sender.user.last_name}".strip(),
+                        "phone": f"0{p.sender.user.username}",
+                    }
+                )
+                if len(contacts) == LIMIT:
+                    break
+
+        return Response({"contacts": contacts}, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["intracity/Packages"],

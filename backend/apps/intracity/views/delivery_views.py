@@ -42,9 +42,6 @@ class DeliveryViewSet(ViewSet):
     @transaction.atomic
     def assign_pending_packages(self, request):
 
-
-
-        
         latest_status = (
             PackageStatus.objects.filter(package=OuterRef("pk"))
             .order_by("-updated_at")
