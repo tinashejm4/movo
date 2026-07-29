@@ -1,9 +1,7 @@
 from django.db import transaction
-from django.db.models import OuterRef, Subquery, Q
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -11,7 +9,8 @@ from rest_framework.viewsets import ViewSet
 from apps.bookkeeping.models import Account, IntracitySale
 from apps.users.models import City, Suburb
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from ..models import Biker, Package, PackageStatus, Invoice, SuburbSearchLog
+from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
+from ..services.package_assignment import assign_pending_packages
 import logging
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
@@ -41,101 +40,7 @@ class DeliveryViewSet(ViewSet):
     )
     @transaction.atomic
     def assign_pending_packages(self, request):
-
-
-
-        
-        latest_status = (
-            PackageStatus.objects.filter(package=OuterRef("pk"))
-            .order_by("-updated_at")
-            .values("status")[:1]
-        )
-        today = timezone.now().date()
-        pending_packages = list(
-            Package.objects.filter(biker__isnull=True, added_at__date=today)
-            .annotate(current_status=Subquery(latest_status))
-            .filter(current_status="Pending")
-            .order_by("-is_fast_delivery", "added_at")
-        )
-
-        if not pending_packages:
-            logger.info("assign_pending_packages: no pending packages found")
-            return Response(
-                {"message": "No pending packages available for assignment"},
-                status=status.HTTP_200_OK,
-            )
-
-        free_bikers = []
-        for biker in Biker.objects.select_related("user").order_by("id"):
-            has_active_package = (
-                Package.objects.filter(biker=biker)
-                .annotate(current_status=Subquery(latest_status))
-                .filter(current_status__in=["Pending", "In Transit"])
-                .exists()
-            )
-            if not has_active_package:
-                free_bikers.append(biker)
-
-        if not free_bikers:
-            logger.info("assign_pending_packages: no available bikers")
-            return Response(
-                {"message": "No available bikers for assignment"},
-                status=status.HTTP_200_OK,
-            )
-
-        assignments = []
-        channel_layer = get_channel_layer()
-
-        for package, biker in zip(pending_packages, free_bikers):
-            package.biker = biker
-            package.assigned_at = timezone.now()
-            package.save(update_fields=["biker", "assigned_at"])
-
-            assignment_payload = {
-                "package_id": package.id,
-                "slug": package.slug,
-                "is_fast_delivery": package.is_fast_delivery,
-                "biker_id": biker.id,
-                "biker_name": f"{biker.user.first_name} {biker.user.last_name}".strip(),
-                "biker_phone": f"0{biker.user.username}",
-                "assigned_at": package.assigned_at.isoformat()
-                if package.assigned_at
-                else None,
-                "added_at": package.added_at.isoformat() if package.added_at else None,
-            }
-            assignments.append(assignment_payload)
-
-            if channel_layer:
-                try:
-                    logger.info(
-                        "assign_pending_packages: publishing package_id=%s biker_id=%s",
-                        package.id,
-                        biker.id,
-                    )
-                    async_to_sync(channel_layer.group_send)(
-                        "package_assignments",
-                        {"type": "package.assigned", "payload": assignment_payload},
-                    )
-                    async_to_sync(channel_layer.group_send)(
-                        f"package_{package.id}",
-                        {"type": "package.assigned", "payload": assignment_payload},
-                    )
-                except Exception as exc:
-                    logger.warning("WebSocket publish skipped: %s", exc)
-
-        logger.info(
-            "assign_pending_packages: assigned_count=%s unassigned_count=%s",
-            len(assignments),
-            max(len(pending_packages) - len(assignments), 0),
-        )
-
-        response_payload = {
-            "message": "Pending packages assigned successfully",
-            "assigned_count": len(assignments),
-            "unassigned_count": max(len(pending_packages) - len(assignments), 0),
-            "assigned_packages": assignments,
-        }
-        return Response(response_payload, status=status.HTTP_200_OK)
+        return Response(assign_pending_packages(), status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["intracity/Delivery"],

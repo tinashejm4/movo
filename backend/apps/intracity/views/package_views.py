@@ -27,6 +27,7 @@ from ..serializers.package_serializers import (
     SuburbSearchResponseSerializer,
 )
 from ..models import Package, PackageStatus, Invoice, Price, SuburbSearchLog
+from ..services.package_assignment import assign_pending_packages_safely
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from apps.users.utils import normalize_zimbabwean_number, is_valid_zimbabwean_number
 
@@ -340,6 +341,7 @@ class PackageViewSet(ViewSet):
         status_records = list(
             PackageStatus.objects.filter(package=package).order_by("updated_at")
         )
+        transaction.on_commit(assign_pending_packages_safely)
 
         return Response(
             self.build_package_payload(package, invoice, status_records),
