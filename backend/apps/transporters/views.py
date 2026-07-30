@@ -130,7 +130,7 @@ class TransporterView(ViewSet):
     )
 
     @transaction.atomic
-    def dropoff_verify(self, request):
+    def dropoff_package(self, request):
         serializer = DropoffPackageRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=False)
         data = serializer.initial_data

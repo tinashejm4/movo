@@ -2,6 +2,10 @@ import json
 import logging
 
 from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
+from django.db.models import Q
+
+from .models import Package
 
 
 logger = logging.getLogger(__name__)
@@ -9,8 +13,19 @@ logger = logging.getLogger(__name__)
 
 class PackageAssignmentConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        self.user = self.scope.get("user")
+        if not self.user or not self.user.is_authenticated:
+            await self.close(code=4401)
+            return
+
         self.global_group = "package_assignments"
         self.package_id = self.scope["url_route"]["kwargs"].get("package_id")
+        if self.package_id is not None and not await self._can_access_package(
+            self.package_id
+        ):
+            await self.close(code=4403)
+            return
+
         self.group_name = (
             f"package_{self.package_id}"
             if self.package_id is not None
@@ -48,16 +63,30 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
             logger.warning("WebSocket group unsubscribe failed: %s", exc)
 
     async def package_assigned(self, event):
+        payload = event.get("payload", {})
+        package_id = payload.get("package_id")
+        if not package_id or not await self._can_access_package(package_id):
+            return
+
         logger.info(
             "WebSocket event delivered: package_assigned package_id=%s",
-            event.get("payload", {}).get("package_id"),
+            package_id,
         )
         await self.send(
             text_data=json.dumps(
                 {
                     "event": "package_assigned",
-                    "data": event["payload"],
+                    "data": payload,
                 },
                 default=str,
             )
         )
+
+    @database_sync_to_async
+    def _can_access_package(self, package_id):
+        """Allow only a package's sender, receiver, or assigned biker."""
+        return Package.objects.filter(id=package_id).filter(
+            Q(sender__user_id=self.user.id)
+            | Q(receiver__user_id=self.user.id)
+            | Q(biker__user_id=self.user.id)
+        ).exists()
