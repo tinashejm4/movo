@@ -11,7 +11,6 @@ package_list = PackageViewSet.as_view({"get": "list_packages"})
 package_status = PackageViewSet.as_view({"get": "current_status"})
 search_suburb = PackageViewSet.as_view({"get": "search_suburb"})
 package_price = PackageViewSet.as_view({"post": "package_price"})
-package_contacts = PackageViewSet.as_view({"get": "get_contacts"})
 
 assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packages"})
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
@@ -37,10 +36,6 @@ urlpatterns = [
     path("package/", 
          package_detail, 
          name="intracity_package_detail"
-         ),
-    path("get-previous-contacts/", 
-         package_contacts,
-         name="intracity_package_contacts"
          ),
     path(
         "package-status/",
@@ -73,11 +68,6 @@ urlpatterns = [
          search_suburb, 
          name="intracity_search_suburb"
          ),
-    path(
-        "package-contacts/",
-        package_contacts,
-        name="intracity_package_contacts",
-    ),
     path(
         "ecocash-payment/",
         ecocash_payment,
