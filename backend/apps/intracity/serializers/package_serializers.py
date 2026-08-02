@@ -116,19 +116,3 @@ class SuburbSearchItemSerializer(serializers.Serializer):
 
 class SuburbSearchResponseSerializer(serializers.Serializer):
     suburbs = SuburbSearchItemSerializer(many=True)
-
-
-class PackageContactsQuerySerializer(serializers.Serializer):
-    is_sending = serializers.BooleanField(
-        help_text="True to return people you have sent to; False to return people you have received from."
-    )
-
-
-class PackageContactItemSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    name = serializers.CharField()
-    phone = serializers.CharField()
-
-
-class PackageContactsResponseSerializer(serializers.Serializer):
-    contacts = PackageContactItemSerializer(many=True)
