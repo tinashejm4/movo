@@ -44,10 +44,9 @@ class PackageViewSet(ViewSet):
             "create_package",
             "list_packages",
             "package_detail",
-            "current_status",
         }:
             return [IsAuthenticated()]
-        if self.action in {"package_price", "search_suburb"}:
+        if self.action in {"package_price", "search_suburb", "current_status"}:
             return [AllowAny()]
         return [IsAuthenticated()]
 
@@ -66,27 +65,28 @@ class PackageViewSet(ViewSet):
     )
     def current_status(self, request):
         package_id = request.query_params.get("package_id")
-        if not package_id:
+        package_slug = request.query_params.get("package_slug")
+        if not package_id and not package_slug:
             return Response(
-                {"error": "package_id is required"},
+                {"error": "package_id or package_slug is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        package = (
-            Package.objects.select_related(
-                "sender__user", "receiver__user", "biker__user"
-            )
-            .filter(id=package_id)
-            .filter(
+        package_query = Package.objects.select_related(
+            "sender__user", "receiver__user", "biker__user"
+        ).filter(Q(id=package_id) | Q(slug=package_slug))
+
+        if request.user.is_authenticated:
+            package_query = package_query.filter(
                 Q(sender__user=request.user)
                 | Q(receiver__user=request.user)
                 | Q(biker__user=request.user)
             )
-            .first()
-        )
+
+        package = package_query.first()
         if not package:
             return Response(
-                {"error": f"Package not found for id {package_id}"},
+                {"error": f"Package not found for id {package_id} or slug {package_slug}"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 

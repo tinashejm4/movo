@@ -425,6 +425,16 @@ class IntracityPackageStatusTests(APITestCase):
 		self.assertTrue(response.data["is_collected"])
 		self.assertFalse(response.data["is_delivered"])
 
+	def test_current_status_allows_unauthenticated_user(self):
+		self.client.force_authenticate(user=None)
+		response = self.client.get(
+			reverse("intracity_package_status"),
+			{"package_id": self.package.id},
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["package_id"], self.package.id)
+
 	def test_current_status_requires_package_id(self):
 		response = self.client.get(reverse("intracity_package_status"))
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
