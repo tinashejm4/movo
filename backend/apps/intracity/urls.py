@@ -22,6 +22,9 @@ invoice_details = InvoiceViewSet.as_view({"get": "invoice_details"})
 
 ecocash_payment = PaymentViewSet.as_view({"post": "ecocash_payment"})
 ecocash_notify = PaymentViewSet.as_view({"post": "ecocash_notify"})
+paynow_payment = PaymentViewSet.as_view({"post": "paynow_payment"})
+paynow_notify = PaymentViewSet.as_view({"get": "paynow_notify"})
+
 
 
 urlpatterns = [
@@ -74,9 +77,19 @@ urlpatterns = [
         name="intracity_ecocash_payment",
     ),
     path(
+        "paynow-payment/",
+        paynow_payment,
+        name="intracity_paynow_payment",
+    ),
+    path(
         "ecocash-notify/",
         ecocash_notify,
         name="intracity_ecocash_notify",
+    ),
+    path(
+        "paynow-notify/",
+        paynow_notify,
+        name="intracity_paynow_notify",
     ),
     path(
         "package-price/",

@@ -12,9 +12,9 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from django.urls import reverse
-from ..models import Invoice, EcocashPayment
+from ..models import Invoice, EcocashPayment, PaynowPayment
 from apps.users.models import Customer
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema, OpenApiParameter
 from ..serializers.payment_serializer import (
     MobilePaymentRequestSerializer,
     MobilePaymentResponseSerializer,
@@ -22,6 +22,9 @@ from ..serializers.payment_serializer import (
     PaymentProviderErrorResponseSerializer,
     EcocashPaymentRequestSerializer,
     EcocashPaymentResponseSerializer,
+    PaynowPaymentProcessedResponseSerializer,
+    PaynowPaymentRequestSerializer,
+    PaynowPaymentResponseSerializer,
 )
 from apps.users.utils import is_valid_zimbabwean_number,normalize_zimbabwean_number
 import logging
@@ -58,9 +61,9 @@ class PaymentViewSet(ViewSet):
 
     @extend_schema(
         tags=["intracity/Payments"],
-        request=EcocashPaymentRequestSerializer,
+        request=PaynowPaymentRequestSerializer,
         responses={
-            200: EcocashPaymentResponseSerializer,
+            200: PaynowPaymentResponseSerializer,
             400: OpenApiResponse(
                 PaymentProviderErrorResponseSerializer,
                 description="Incorrect request parameters or incomplete payment",
@@ -75,6 +78,188 @@ class PaymentViewSet(ViewSet):
             ),
         },
     )
+
+    def paynow_payment(self, request):
+        serializer = PaynowPaymentRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invoice_id = serializer.validated_data["invoice_id"]
+        phone_number = serializer.validated_data["phone_number"]
+
+        phone_number = f"263{normalize_zimbabwean_number(phone_number)}"
+
+        if not is_valid_zimbabwean_number(phone_number) or not self._is_econet_number(phone_number):
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {
+                        "error": "Invalid Zimbabwean or Econet phone number format",
+                    }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        invoice = Invoice.objects.filter(id=invoice_id).first()
+
+        if not invoice:
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {
+                        "error": "Invoice not found for the provided package",
+                    }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if invoice.is_paid:
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {
+                        "error": "Invoice is already paid",
+                    }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ref = f"REF-{invoice.package.slug}-{random.randint(100000, 999999)}"
+        payment = paynow.create_payment(ref, "movo@example.com")
+        payment.add("Online Payment", invoice.amount)
+
+        try:
+            response = paynow.send_mobile(payment, phone_number, "ecocash")
+        except (HTTPError, URLError) as e:
+            return Response(
+                PaymentProviderErrorResponseSerializer(
+                    {
+                        "error": "Payment provider error",
+                        "details": str(e),
+                    }
+                ).data,
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        paynow_payment = PaynowPayment(
+            customer=Customer.objects.get(user=request.user),
+            invoice=invoice,
+            phone_number=phone_number,
+            reference=ref,
+            poll_url=response.poll_url,
+        )
+        paynow_payment.save()
+
+        if response.success:
+            invoice.payment_method = "PaynowEcocash"
+            invoice.save(update_fields=["payment_method"])
+            return Response(
+                {
+                    "message": "Payment request successful",
+                    "poll_url": response.poll_url,
+                },
+                status=status.HTTP_200_OK,
+            )
+        else:
+            return Response(
+                PaymentProviderErrorResponseSerializer(
+                    {
+                        "error": "Payment request failed",
+                        "details": "Paynow Error",
+                    }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @extend_schema(
+        tags=["intracity/Payments"],
+        parameters=[
+            OpenApiParameter(
+                name="invoice_id",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=True,
+            ),
+        ],
+        responses={
+            200: PaynowPaymentResponseSerializer,
+            400: OpenApiResponse(
+                PaymentProviderErrorResponseSerializer,
+                description="Incorrect request parameters or incomplete payment",
+            ),
+            500: OpenApiResponse(
+                PaymentErrorResponseSerializer,
+                description="Payment configuration is missing",
+            ),
+            502: OpenApiResponse(
+                PaymentProviderErrorResponseSerializer,
+                description="Payment provider error",
+            ),
+        },
+    )
+    @transaction.atomic
+    def paynow_notify(self, request):
+        invoice_id = request.query_params.get("invoice_id")
+        invoice = Invoice.objects.filter(id=invoice_id).first()
+
+        if not invoice:
+            return Response(
+                {"error": "Invoice not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if invoice.is_paid:
+            return Response(
+                {
+                    "message": "Invoice is already paid",
+                    "invoice_id": invoice.id,
+                    "is_paid": invoice.is_paid,
+                    "amount": invoice.amount,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        paynow_payment = PaynowPayment.objects.filter(invoice=invoice).order_by("-pk").first()
+
+        if not paynow_payment:
+            return Response(
+                {"error": "Paynow payment not found for the provided invoice"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        poll_url = paynow_payment.poll_url
+        if not poll_url:
+            return Response(
+                {"error": "Poll URL not found for the provided Paynow payment"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        poll_response = paynow.check_transaction_status(poll_url)
+
+        if poll_response.status == "paid":
+            paynow_payment.is_successful = True
+            paynow_payment.paid_at = timezone.now()
+            paynow_payment.save(update_fields=["is_successful", "paid_at"])
+            invoice.is_paid = True
+            invoice.paid_at = timezone.now()
+            invoice.save(update_fields=["is_paid", "paid_at"])
+            return Response(
+                PaynowPaymentProcessedResponseSerializer(
+                    {
+                        "message": "Payment notification processed successfully",
+                        "invoice_id": invoice.id,
+                        "is_paid": invoice.is_paid,
+                        "paid_at": invoice.paid_at,
+                        "amount": invoice.amount,
+
+                    }
+                ).data,
+                status=status.HTTP_200_OK,
+            )
+        else:
+            return Response(
+                PaymentErrorResponseSerializer(
+                {
+                    "description": "Payment not successful",
+                }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @transaction.atomic
     def ecocash_payment(self, request):
@@ -182,8 +367,6 @@ class PaymentViewSet(ViewSet):
     
     @transaction.atomic
     def ecocash_update_payment_status(self, request):
-
-
 
         return Response(
             {"message": "Use ecocash_notify endpoint for provider callbacks."},

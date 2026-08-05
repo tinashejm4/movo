@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -148,9 +149,41 @@ USE_INMEMORY_CHANNEL_LAYER = (
 
 CHANNEL_REDIS_HOST = os.environ.get("CHANNEL_REDIS_HOST", "127.0.0.1")
 CHANNEL_REDIS_PORT = int(os.environ.get("CHANNEL_REDIS_PORT", "6379"))
-CHANNEL_REDIS_URL = os.environ.get(
-    "CHANNEL_REDIS_URL", f"redis://{CHANNEL_REDIS_HOST}:{CHANNEL_REDIS_PORT}/0"
-)
+
+
+def _build_channel_redis_url() -> str:
+    # Prefer explicit URL-style variables often used in cloud deployments.
+    explicit_url = (
+        os.environ.get("CHANNEL_REDIS_URL")
+        or os.environ.get("REDIS_URL")
+        or os.environ.get("AZURE_REDIS_URL")
+    )
+    if explicit_url:
+        return explicit_url
+
+    # Support Azure Cache connection string format:
+    # host:port,password=...,ssl=True,abortConnect=False
+    azure_conn = os.environ.get("AZURE_REDIS_CONNECTIONSTRING", "").strip()
+    if azure_conn and "://" not in azure_conn:
+        parts = [part.strip() for part in azure_conn.split(",") if part.strip()]
+        host_port = parts[0]
+        options = {}
+        for part in parts[1:]:
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            options[key.strip().lower()] = value.strip()
+
+        password = options.get("password", "")
+        ssl_enabled = options.get("ssl", "").lower() == "true"
+        scheme = "rediss" if ssl_enabled else "redis"
+        auth_segment = f":{quote(password, safe='')}@" if password else ""
+        return f"{scheme}://{auth_segment}{host_port}/0"
+
+    return f"redis://{CHANNEL_REDIS_HOST}:{CHANNEL_REDIS_PORT}/0"
+
+
+CHANNEL_REDIS_URL = _build_channel_redis_url()
 CHANNEL_REDIS_SOCKET_TIMEOUT = float(
     os.environ.get("CHANNEL_REDIS_SOCKET_TIMEOUT", "15")
 )

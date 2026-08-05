@@ -58,6 +58,7 @@ class Invoice(models.Model):
     payment_methods = [
         ('Ecocash', 'Ecocash'),
         ('Cash', 'Cash'),
+        ('PaynowEcocash', 'PaynowEcocash'),
     ]
 
     package = models.OneToOneField(Package, on_delete=models.CASCADE)
@@ -113,3 +114,16 @@ class EcocashPayment(models.Model):
 
     def __str__(self):
         return f"EcoCash Payment for Invoice {self.invoice.id} - {'Successful' if self.is_successful else 'Failed'}"
+
+class PaynowPayment(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE)
+    phone_number = models.CharField(max_length=20)
+    reference = models.CharField(max_length=100, unique=True)
+    poll_url = models.URLField(max_length=200, blank=True, null=True)
+    is_successful = models.BooleanField(default=False)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Invoice: {self.invoice.id} - {'Successful' if self.is_successful else 'Failed'}"
