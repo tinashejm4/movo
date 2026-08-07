@@ -57,8 +57,8 @@ class PackageListSerializer(serializers.Serializer):
 
 
 class PackageDetailQuerySerializer(serializers.Serializer):
-    package_id = serializers.IntegerField()
-
+    package_id = serializers.IntegerField(required=False)
+    package_slug = serializers.CharField(required=False)
 
 class CurrentPackageStatusSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
