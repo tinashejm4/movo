@@ -11,6 +11,7 @@ from apps.users.models import City, Suburb
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.package_assignment import assign_pending_packages
+from ..services.package_cancellation import can_cancel_package
 import logging
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
@@ -70,7 +71,9 @@ class DeliveryViewSet(ViewSet):
             )
 
         package = get_object_or_404(
-            Package.objects.select_related("sender__user", "receiver__user"),
+            Package.objects.select_related(
+                "sender__user", "receiver__user", "invoice"
+            ),
             id=package_id,
         )
 
@@ -85,7 +88,17 @@ class DeliveryViewSet(ViewSet):
             .order_by("-updated_at")
             .first()
         )
-        if not latest_status or latest_status.status != "Pending":
+        invoice = getattr(package, "invoice", None)
+        current_status = latest_status.status if latest_status else None
+        if not can_cancel_package(
+            invoice=invoice,
+            current_status=current_status,
+        ):
+            if invoice and invoice.is_paid:
+                return Response(
+                    {"error": "Paid orders cannot be cancelled"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(
                 {"error": "Order can only be cancelled when status is Pending"},
                 status=status.HTTP_400_BAD_REQUEST,

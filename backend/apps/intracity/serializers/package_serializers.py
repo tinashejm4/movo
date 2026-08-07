@@ -40,6 +40,7 @@ class PackageDetailRequestSerializer(serializers.Serializer):
     collected_at = serializers.DateTimeField(allow_null=True)
     is_cancelled = serializers.BooleanField()
     cancelled_at = serializers.DateTimeField(allow_null=True)
+    can_cancel = serializers.BooleanField()
     is_delivered = serializers.BooleanField()
     delivered_at = serializers.DateTimeField(allow_null=True)
 
@@ -70,6 +71,7 @@ class CurrentPackageStatusSerializer(serializers.Serializer):
     collected_at = serializers.DateTimeField(allow_null=True)
     is_cancelled = serializers.BooleanField()
     cancelled_at = serializers.DateTimeField(allow_null=True)
+    can_cancel = serializers.BooleanField()
     is_delivered = serializers.BooleanField()
     delivered_at = serializers.DateTimeField(allow_null=True)
 
