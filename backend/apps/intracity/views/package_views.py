@@ -26,6 +26,7 @@ from ..services.package_pricing import (
     PackagePricingNotFound,
     calculate_package_price,
 )
+from ..services.package_cancellation import can_cancel_package
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from apps.users.utils import is_valid_zimbabwean_number
 
@@ -74,7 +75,7 @@ class PackageViewSet(ViewSet):
 
         package = (
             Package.objects.select_related(
-                "sender__user", "receiver__user", "biker__user"
+                "sender__user", "receiver__user", "biker__user", "invoice"
             )
             .filter(id=package_id)
             .filter(
@@ -94,6 +95,8 @@ class PackageViewSet(ViewSet):
             PackageStatus.objects.filter(package=package).order_by("updated_at")
         )
         latest_status = status_records[-1] if status_records else None
+        current_status = latest_status.status if latest_status else "Pending"
+        invoice = getattr(package, "invoice", None)
 
         status_map = {}
         for status_record in status_records:
@@ -109,7 +112,7 @@ class PackageViewSet(ViewSet):
             "driver_number": (
                 self.get_phone_number(package.biker.user) if package.biker else None
             ),
-            "status": latest_status.status if latest_status else "Pending",
+            "status": current_status,
             "status_updated_at": latest_status.updated_at if latest_status else None,
             "is_active": (latest_status.status if latest_status else "Pending")
             in self.ACTIVE_PACKAGE_STATUSES,
@@ -117,6 +120,10 @@ class PackageViewSet(ViewSet):
             "collected_at": collected_at,
             "is_cancelled": cancelled_at is not None,
             "cancelled_at": cancelled_at,
+            "can_cancel": can_cancel_package(
+                invoice=invoice,
+                current_status=current_status,
+            ),
             "is_delivered": delivered_at is not None,
             "delivered_at": delivered_at,
         }
@@ -323,6 +330,9 @@ class PackageViewSet(ViewSet):
         delivered_at = package.delivered_at or status_map.get("Delivered")
         collected_at = status_map.get("In Transit")
         cancelled_at = status_map.get("Cancelled")
+        current_status = (
+            status_records[-1].status if status_records else "Pending"
+        )
 
         serializer = PackageDetailSerializer(
             {
@@ -360,6 +370,10 @@ class PackageViewSet(ViewSet):
                 "collected_at": collected_at,
                 "is_cancelled": cancelled_at is not None,
                 "cancelled_at": cancelled_at,
+                "can_cancel": can_cancel_package(
+                    invoice=invoice,
+                    current_status=current_status,
+                ),
                 "is_delivered": delivered_at is not None,
                 "delivered_at": delivered_at,
                 "invoice_amount": invoice.amount if invoice else None,

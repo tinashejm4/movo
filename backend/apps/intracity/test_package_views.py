@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 
 from apps.users.models import Biker, City, Contact, Customer
 
-from .models import Package, PackageStatus
+from .models import Invoice, Package, PackageStatus
 
 
 class IntracityPackageListTests(APITestCase):
@@ -69,3 +69,120 @@ class IntracityPackageListTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["driver_number"], "0779000013")
+
+    def test_packages_can_cancel_only_when_pending_and_unpaid(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="333333",
+            receiver_code="444444",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+        invoice = Invoice.objects.create(package=package, amount="10.00")
+
+        response = self.client.get(reverse("intracity_package_list"))
+        result = next(
+            item
+            for item in response.data["results"]
+            if item["package_id"] == package.id
+        )
+        self.assertTrue(result["can_cancel"])
+
+        invoice.is_paid = True
+        invoice.save(update_fields=["is_paid"])
+        response = self.client.get(reverse("intracity_package_list"))
+        result = next(
+            item
+            for item in response.data["results"]
+            if item["package_id"] == package.id
+        )
+        self.assertFalse(result["can_cancel"])
+
+        invoice.is_paid = False
+        invoice.save(update_fields=["is_paid"])
+        PackageStatus.objects.create(package=package, status="In Transit")
+        response = self.client.get(reverse("intracity_package_list"))
+        result = next(
+            item
+            for item in response.data["results"]
+            if item["package_id"] == package.id
+        )
+        self.assertFalse(result["can_cancel"])
+
+        PackageStatus.objects.create(package=package, status="Delivered")
+        response = self.client.get(reverse("intracity_package_list"))
+        result = next(
+            item
+            for item in response.data["results"]
+            if item["package_id"] == package.id
+        )
+        self.assertFalse(result["can_cancel"])
+
+    def test_package_status_includes_can_cancel(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="555555",
+            receiver_code="666666",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+        Invoice.objects.create(package=package, amount="10.00")
+
+        response = self.client.get(
+            reverse("intracity_package_status"),
+            {"package_id": package.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["can_cancel"])
+
+
+class IntracityPaidPackageCancellationTests(APITestCase):
+    def setUp(self):
+        city = City.objects.create(
+            name="Bulawayo", province="Bulawayo", country="Zimbabwe"
+        )
+        sender_user = User.objects.create_user(
+            username="0779000021", password="pass"
+        )
+        receiver_user = User.objects.create_user(
+            username="0779000022", password="pass"
+        )
+        sender = Customer.objects.create(user=sender_user)
+        receiver = Customer.objects.create(user=receiver_user)
+        self.package = Package.objects.create(
+            sender=sender,
+            receiver=receiver,
+            city=city,
+            pickup_address="Hillside",
+            dropoff_address="Suburbs",
+            sender_code="777777",
+            receiver_code="888888",
+        )
+        PackageStatus.objects.create(package=self.package, status="Pending")
+        Invoice.objects.create(
+            package=self.package,
+            amount="10.00",
+            is_paid=True,
+        )
+        self.client.force_authenticate(user=sender_user)
+
+    def test_paid_pending_package_cannot_be_cancelled(self):
+        response = self.client.post(
+            reverse("intracity_cancel_order"),
+            {"package_id": self.package.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["error"], "Paid orders cannot be cancelled")
+        self.assertEqual(
+            PackageStatus.objects.filter(package=self.package).count(),
+            1,
+        )
