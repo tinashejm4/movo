@@ -28,6 +28,15 @@ from django.http import JsonResponse
 def health(request):
     return JsonResponse({"status": "ok"})
 
+def get_server_version(request):
+    # You can replace this with your actual server version retrieval logic
+    server_version = "1.0.0"  # Example version
+    date = "2026-08-08"  # Example date
+    change_log = [
+        "Added version endpoint to retrieve server version and date.",
+    ]
+    return JsonResponse({"server_version": server_version, "date": date})
+
 app_urlpatterns = [
     path("api/users/", include("apps.users.urls")),
     path("api/intercity/", include("apps.intercity.urls")),
@@ -37,7 +46,7 @@ app_urlpatterns = [
     path("api/health/", include("apps.health.urls")),
 ]
 
-app_urlpatterns += [path("health/", health)]
+app_urlpatterns += [path("api/health/", health), path("api/server-version/", get_server_version)]
 
 
 third_party_urlpatterns = [
