@@ -355,13 +355,18 @@ class PackageViewSet(ViewSet):
             status_records[-1].status if status_records else "Pending"
         )
 
+        receiver_id = package.receiver.id
+        sender_id = package.sender.id
+        initiator_id = sender_id if package.is_sender_initiated else receiver_id
+
         serializer = PackageDetailSerializer(
             {
                 "package_id": package.id,
                 "slug": package.slug,
-                "receiver_id": package.receiver.id,
+                "initiator_id": initiator_id,
+                "receiver_id": receiver_id,
                 "receiver_name": f"{package.receiver.user.first_name} {package.receiver.user.last_name}".strip(),
-                "sender_id": package.sender.id,
+                "sender_id": sender_id,
                 "sender_name": f"{package.sender.user.first_name} {package.sender.user.last_name}".strip(),
                 "sender_phone": self.get_phone_number(package.sender.user),
                 "receiver_phone": self.get_phone_number(package.receiver.user),
