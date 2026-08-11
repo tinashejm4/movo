@@ -8,6 +8,7 @@ class ErrorResponseSerializer(serializers.Serializer):
 class PackageDetailRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     slug = serializers.CharField()
+    initiator_id = serializers.IntegerField()
     sender_id = serializers.IntegerField()
     sender_name = serializers.CharField(allow_blank=True)
     sender_phone = serializers.CharField(allow_blank=True, required=False)
@@ -45,6 +46,15 @@ class PackageDetailRequestSerializer(serializers.Serializer):
     delivered_at = serializers.DateTimeField(allow_null=True)
 
 
+class PackageListRequestSerializer(serializers.Serializer):
+    package_id = serializers.IntegerField()
+    pickup_address = serializers.CharField()
+    dropoff_address = serializers.CharField()
+    collected_at = serializers.DateTimeField(allow_null=True)
+    delivered_at = serializers.DateTimeField(allow_null=True)
+    slug = serializers.CharField()
+    package_created_at = serializers.DateTimeField()
+
 PackageRequestSerializer = PackageDetailRequestSerializer
 PackageDetailSerializer = PackageDetailRequestSerializer
 
@@ -53,7 +63,7 @@ class PackageListSerializer(serializers.Serializer):
     count = serializers.IntegerField()
     next = serializers.URLField(allow_null=True)
     previous = serializers.URLField(allow_null=True)
-    results = PackageDetailRequestSerializer(many=True)
+    results = PackageListRequestSerializer(many=True)
 
 
 class PackageDetailQuerySerializer(serializers.Serializer):

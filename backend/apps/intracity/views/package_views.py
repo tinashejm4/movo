@@ -15,6 +15,7 @@ from ..serializers.package_serializers import (
     PackagePriceRequestSerializer,
     PackagePriceResponseSerializer,
     SuburbSearchResponseSerializer,
+    PackageListRequestSerializer,
 )
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.create_package import (
@@ -32,10 +33,9 @@ from apps.users.utils import is_valid_zimbabwean_number
 
 
 class PackageListPagination(PageNumberPagination):
-    page_size = 20
+    page_size = 10
     page_size_query_param = "page_size"
-    max_page_size = 100
-
+    max_page_size = 10
 
 class PackageViewSet(ViewSet):
     ACTIVE_PACKAGE_STATUSES = {"Pending", "In Transit"}
@@ -87,7 +87,7 @@ class PackageViewSet(ViewSet):
         package = package_query.first()
         if not package:
             return Response(
-                {"error": f"Package not found for id {package_id} or slug {package_slug}"},
+                {"error": f"Package not found. Please check the package code and try again."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -197,10 +197,6 @@ class PackageViewSet(ViewSet):
 
         page_packages = list(page)
         package_ids = [package.id for package in page_packages]
-        invoices_by_package_id = {
-            invoice.package_id: invoice
-            for invoice in Invoice.objects.filter(package_id__in=package_ids)
-        }
         status_records_by_package_id = {}
         for status_record in PackageStatus.objects.filter(
             package_id__in=package_ids
@@ -210,9 +206,8 @@ class PackageViewSet(ViewSet):
             ).append(status_record)
 
         response_data = [
-            self.build_package_payload(
+            self.build_package_list_payload(
                 package=package,
-                invoice=invoices_by_package_id.get(package.id),
                 status_records=status_records_by_package_id.get(package.id, []),
             )
             for package in page_packages
@@ -317,6 +312,32 @@ class PackageViewSet(ViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    def build_package_list_payload(self, package, status_records=None):
+        if status_records is None:
+            status_records = list(
+                PackageStatus.objects.filter(package=package).order_by("updated_at")
+            )
+
+        status_map = {}
+        for status_record in status_records:
+            status_map.setdefault(status_record.status, status_record.updated_at)
+
+        delivered_at = package.delivered_at or status_map.get("Delivered")
+        collected_at = status_map.get("In Transit")
+
+        serializer = PackageListRequestSerializer(
+            {
+                "package_id": package.id,
+                "pickup_address": package.pickup_address,
+                "dropoff_address": package.dropoff_address,
+                "collected_at": collected_at,
+                "delivered_at": delivered_at,
+                "slug": package.slug,
+                "package_created_at": package.added_at,
+            }
+        )
+        return serializer.data
+
     def build_package_payload(self, package, invoice=None, status_records=None):
         if status_records is None:
             status_records = list(
@@ -334,13 +355,18 @@ class PackageViewSet(ViewSet):
             status_records[-1].status if status_records else "Pending"
         )
 
+        receiver_id = package.receiver.id
+        sender_id = package.sender.id
+        initiator_id = sender_id if package.is_sender_initiated else receiver_id
+
         serializer = PackageDetailSerializer(
             {
                 "package_id": package.id,
                 "slug": package.slug,
-                "receiver_id": package.receiver.id,
+                "initiator_id": initiator_id,
+                "receiver_id": receiver_id,
                 "receiver_name": f"{package.receiver.user.first_name} {package.receiver.user.last_name}".strip(),
-                "sender_id": package.sender.id,
+                "sender_id": sender_id,
                 "sender_name": f"{package.sender.user.first_name} {package.sender.user.last_name}".strip(),
                 "sender_phone": self.get_phone_number(package.sender.user),
                 "receiver_phone": self.get_phone_number(package.receiver.user),

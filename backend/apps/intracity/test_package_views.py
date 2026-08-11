@@ -31,7 +31,7 @@ class IntracityPackageListTests(APITestCase):
         Contact.objects.create(user=driver_user, phone_number="0779000013")
         self.client.force_authenticate(user=sender_user)
 
-    def test_packages_include_assigned_driver_number(self):
+    def test_package_list_returns_compact_payload_shape(self):
         package = Package.objects.create(
             sender=self.sender,
             receiver=self.receiver,
@@ -47,7 +47,16 @@ class IntracityPackageListTests(APITestCase):
         response = self.client.get(reverse("intracity_package_list"))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["results"][0]["driver_number"], "0779000013")
+        result = response.data["results"][0]
+        self.assertEqual(result["package_id"], package.id)
+        self.assertEqual(result["slug"], package.slug)
+        self.assertEqual(result["pickup_address"], "Avondale")
+        self.assertEqual(result["dropoff_address"], "Borrowdale")
+        self.assertIn("package_created_at", result)
+        self.assertIn("collected_at", result)
+        self.assertIn("delivered_at", result)
+        self.assertNotIn("driver_number", result)
+        self.assertNotIn("can_cancel", result)
 
     def test_package_status_includes_assigned_driver_number(self):
         package = Package.objects.create(
@@ -69,57 +78,6 @@ class IntracityPackageListTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["driver_number"], "0779000013")
-
-    def test_packages_can_cancel_only_when_pending_and_unpaid(self):
-        package = Package.objects.create(
-            sender=self.sender,
-            receiver=self.receiver,
-            city=self.city,
-            pickup_address="Avondale",
-            dropoff_address="Borrowdale",
-            sender_code="333333",
-            receiver_code="444444",
-        )
-        PackageStatus.objects.create(package=package, status="Pending")
-        invoice = Invoice.objects.create(package=package, amount="10.00")
-
-        response = self.client.get(reverse("intracity_package_list"))
-        result = next(
-            item
-            for item in response.data["results"]
-            if item["package_id"] == package.id
-        )
-        self.assertTrue(result["can_cancel"])
-
-        invoice.is_paid = True
-        invoice.save(update_fields=["is_paid"])
-        response = self.client.get(reverse("intracity_package_list"))
-        result = next(
-            item
-            for item in response.data["results"]
-            if item["package_id"] == package.id
-        )
-        self.assertFalse(result["can_cancel"])
-
-        invoice.is_paid = False
-        invoice.save(update_fields=["is_paid"])
-        PackageStatus.objects.create(package=package, status="In Transit")
-        response = self.client.get(reverse("intracity_package_list"))
-        result = next(
-            item
-            for item in response.data["results"]
-            if item["package_id"] == package.id
-        )
-        self.assertFalse(result["can_cancel"])
-
-        PackageStatus.objects.create(package=package, status="Delivered")
-        response = self.client.get(reverse("intracity_package_list"))
-        result = next(
-            item
-            for item in response.data["results"]
-            if item["package_id"] == package.id
-        )
-        self.assertFalse(result["can_cancel"])
 
     def test_package_status_includes_can_cancel(self):
         package = Package.objects.create(
