@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import City
@@ -12,7 +12,7 @@ from ..serializers.invoice_serializer import (
 )
 
 class InvoiceViewSet(ViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         tags=["intracity/Invoices"],
@@ -36,10 +36,20 @@ class InvoiceViewSet(ViewSet):
             return Response(
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
-        package = Package.objects.filter(id=package_id).first()
+        package = Package.objects.select_related(
+            "sender__user", "receiver__user"
+        ).filter(id=package_id).first()
         if not package:
             return Response(
                 {"error": "package not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        if request.user.id not in {
+            package.sender.user_id,
+            package.receiver.user_id,
+        }:
+            return Response(
+                {"error": "You do not have access to this invoice"},
+                status=status.HTTP_403_FORBIDDEN,
             )
         invoice = Invoice.objects.filter(package=package).first()
         serializer = InvoiceDetailsResponseSerializer(

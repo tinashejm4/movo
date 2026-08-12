@@ -48,6 +48,7 @@ class PackageDetailRequestSerializer(serializers.Serializer):
 
 class PackageListRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
+    initiator_id = serializers.IntegerField()
     pickup_address = serializers.CharField()
     dropoff_address = serializers.CharField()
     collected_at = serializers.DateTimeField(allow_null=True)

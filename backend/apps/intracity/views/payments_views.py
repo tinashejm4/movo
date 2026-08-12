@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from django.urls import reverse
 from ..models import Invoice, EcocashPayment, PaynowPayment
+from ..services.package_access import package_payer_user_id
 from apps.users.models import Customer
 from drf_spectacular.utils import OpenApiResponse, extend_schema, OpenApiParameter
 from ..serializers.payment_serializer import (
@@ -97,7 +98,9 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invoice = Invoice.objects.filter(id=invoice_id).first()
+        invoice = Invoice.objects.select_related(
+            "package__sender__user", "package__receiver__user"
+        ).filter(id=invoice_id).first()
 
         if not invoice:
             return Response(
@@ -107,6 +110,12 @@ class PaymentViewSet(ViewSet):
                     }
                 ).data,
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if request.user.id != package_payer_user_id(invoice.package, invoice):
+            return Response(
+                {"error": "Only the customer responsible for this invoice can pay it"},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         if invoice.is_paid:
@@ -280,7 +289,9 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invoice = Invoice.objects.filter(id=invoice_id).first()
+        invoice = Invoice.objects.select_related(
+            "package__sender__user", "package__receiver__user"
+        ).filter(id=invoice_id).first()
 
         if not invoice:
             return Response(
@@ -290,6 +301,12 @@ class PaymentViewSet(ViewSet):
                     }
                 ).data,
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if request.user.id != package_payer_user_id(invoice.package, invoice):
+            return Response(
+                {"error": "Only the customer responsible for this invoice can pay it"},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         headers={

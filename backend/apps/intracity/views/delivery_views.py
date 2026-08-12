@@ -12,6 +12,7 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.package_assignment import assign_pending_packages
 from ..services.package_cancellation import can_cancel_package
+from ..services.package_access import package_initiator_user_id
 import logging
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
@@ -77,9 +78,9 @@ class DeliveryViewSet(ViewSet):
             id=package_id,
         )
 
-        if request.user.id not in {package.sender.user_id, package.receiver.user_id}:
+        if request.user.id != package_initiator_user_id(package):
             return Response(
-                {"error": "Only the sender or receiver can cancel this order"},
+                {"error": "Only the customer who initiated the order can cancel it"},
                 status=status.HTTP_403_FORBIDDEN,
             )
 

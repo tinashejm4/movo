@@ -49,6 +49,7 @@ class IntracityPackageListTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         result = response.data["results"][0]
         self.assertEqual(result["package_id"], package.id)
+        self.assertEqual(result["initiator_id"], self.sender.user_id)
         self.assertEqual(result["slug"], package.slug)
         self.assertEqual(result["pickup_address"], "Avondale")
         self.assertEqual(result["dropoff_address"], "Borrowdale")
@@ -99,6 +100,34 @@ class IntracityPackageListTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["can_cancel"])
+
+    def test_package_detail_returns_initiating_user_id(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="555555",
+            receiver_code="666666",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+
+        response = self.client.get(
+            reverse("intracity_package_detail"),
+            {"package_id": package.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["initiator_id"], self.sender.user_id)
+
+        package.is_sender_initiated = False
+        package.save(update_fields=["is_sender_initiated"])
+        response = self.client.get(
+            reverse("intracity_package_detail"),
+            {"package_id": package.id},
+        )
+        self.assertEqual(response.data["initiator_id"], self.receiver.user_id)
 
 
 class IntracityPaidPackageCancellationTests(APITestCase):

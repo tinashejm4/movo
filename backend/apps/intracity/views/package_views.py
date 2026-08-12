@@ -28,6 +28,7 @@ from ..services.package_pricing import (
     calculate_package_price,
 )
 from ..services.package_cancellation import can_cancel_package
+from ..services.package_access import package_initiator_user_id
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from apps.users.utils import is_valid_zimbabwean_number
 
@@ -232,11 +233,22 @@ class PackageViewSet(ViewSet):
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        package = Package.objects.filter(id=package_id).first()
+        package = Package.objects.select_related(
+            "sender__user", "receiver__user"
+        ).filter(id=package_id).first()
         if not package:
             return Response(
                 {"error": f"Package not found for id {package_id}"},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if request.user.id not in {
+            package.sender.user_id,
+            package.receiver.user_id,
+        }:
+            return Response(
+                {"error": "You do not have access to this package"},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         invoice = Invoice.objects.filter(package=package).first()
@@ -328,6 +340,7 @@ class PackageViewSet(ViewSet):
         serializer = PackageListRequestSerializer(
             {
                 "package_id": package.id,
+                "initiator_id": package_initiator_user_id(package),
                 "pickup_address": package.pickup_address,
                 "dropoff_address": package.dropoff_address,
                 "collected_at": collected_at,
@@ -357,7 +370,7 @@ class PackageViewSet(ViewSet):
 
         receiver_id = package.receiver.id
         sender_id = package.sender.id
-        initiator_id = sender_id if package.is_sender_initiated else receiver_id
+        initiator_id = package_initiator_user_id(package)
 
         serializer = PackageDetailSerializer(
             {
