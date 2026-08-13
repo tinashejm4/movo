@@ -6,7 +6,7 @@ from apps.bookkeeping.models import Account, Sale
 
 from apps.users.models import Biker, City, Contact, Customer
 
-from .models import Invoice, Package, PackageStatus
+from ..models import Invoice, Package, PackageStatus
 
 
 class IntracityPackageCreationTests(APITestCase):

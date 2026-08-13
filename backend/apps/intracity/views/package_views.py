@@ -28,6 +28,10 @@ from ..services.package_pricing import (
     calculate_package_price,
 )
 from ..services.package_cancellation import can_cancel_package
+from ..services.package_access import (
+    package_initiator_user_id,
+    package_is_incoming_for_user,
+)
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from apps.users.utils import is_valid_zimbabwean_number
 
@@ -208,6 +212,7 @@ class PackageViewSet(ViewSet):
         response_data = [
             self.build_package_list_payload(
                 package=package,
+                requester_user_id=request.user.id,
                 status_records=status_records_by_package_id.get(package.id, []),
             )
             for package in page_packages
@@ -232,11 +237,22 @@ class PackageViewSet(ViewSet):
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        package = Package.objects.filter(id=package_id).first()
+        package = Package.objects.select_related(
+            "sender__user", "receiver__user"
+        ).filter(id=package_id).first()
         if not package:
             return Response(
                 {"error": f"Package not found for id {package_id}"},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if request.user.id not in {
+            package.sender.user_id,
+            package.receiver.user_id,
+        }:
+            return Response(
+                {"error": "You do not have access to this package"},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         invoice = Invoice.objects.filter(package=package).first()
@@ -267,8 +283,9 @@ class PackageViewSet(ViewSet):
             )
 
         serializer = PackageCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=False)
-        data = serializer.initial_data
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
         counterpart_phone = data.get("phone")
         counterpart_name = data.get("name")
         pickup_address = data.get("pickup_location")
@@ -312,7 +329,9 @@ class PackageViewSet(ViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    def build_package_list_payload(self, package, status_records=None):
+    def build_package_list_payload(
+        self, package, requester_user_id, status_records=None
+    ):
         if status_records is None:
             status_records = list(
                 PackageStatus.objects.filter(package=package).order_by("updated_at")
@@ -328,11 +347,15 @@ class PackageViewSet(ViewSet):
         serializer = PackageListRequestSerializer(
             {
                 "package_id": package.id,
+                "initiator_id": package_initiator_user_id(package),
                 "pickup_address": package.pickup_address,
                 "dropoff_address": package.dropoff_address,
                 "collected_at": collected_at,
                 "delivered_at": delivered_at,
                 "slug": package.slug,
+                "is_incoming": package_is_incoming_for_user(
+                    package, requester_user_id
+                ),
                 "package_created_at": package.added_at,
             }
         )
@@ -357,7 +380,7 @@ class PackageViewSet(ViewSet):
 
         receiver_id = package.receiver.id
         sender_id = package.sender.id
-        initiator_id = sender_id if package.is_sender_initiated else receiver_id
+        initiator_id = package_initiator_user_id(package)
 
         serializer = PackageDetailSerializer(
             {

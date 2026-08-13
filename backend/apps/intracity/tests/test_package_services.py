@@ -10,16 +10,27 @@ from rest_framework.test import APIClient
 
 from apps.users.models import City, Contact, Customer, Suburb
 
-from .models import Price
-from .services.customer_provisioning import resolve_or_create_customer
-from .services.package_notifications import (
+from ..models import Price
+from ..services.customer_provisioning import resolve_or_create_customer
+from ..services.package_notifications import (
     build_package_booking_message,
     send_package_booking_sms,
 )
-from .services.package_pricing import calculate_package_price
+from ..services.package_pricing import calculate_package_price
 
 
 class CustomerProvisioningServiceTests(TestCase):
+    def test_resolve_or_create_customer_accepts_integer_phone_number(self):
+        customer = resolve_or_create_customer(771000002, "nyasha kamba")
+
+        self.assertEqual(customer.user.username, "771000002")
+        self.assertTrue(
+            Contact.objects.filter(
+                user=customer.user,
+                phone_number="771000002",
+            ).exists()
+        )
+
     def test_resolve_or_create_customer_normalizes_phone_and_name(self):
         customer = resolve_or_create_customer("0771000002", "nyasha kamba")
 

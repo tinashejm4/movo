@@ -1,6 +1,7 @@
 import logging
 
 def normalize_zimbabwean_number(phone_number):
+    phone_number = str(phone_number)
     return phone_number[-9:] if len(phone_number) > 9 else phone_number
 
 def is_valid_zimbabwean_number(phone_number):
