@@ -14,3 +14,9 @@ def package_initiator_user_id(package):
 
 def package_payer_user_id(package, invoice):
     return package_payer(package, invoice).user_id
+
+
+def package_user_can_cancel(package, invoice, user_id):
+    if user_id == package_initiator_user_id(package):
+        return True
+    return invoice is not None and user_id == package_payer_user_id(package, invoice)

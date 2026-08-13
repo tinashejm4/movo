@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+from decimal import Decimal
+
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework import status
@@ -7,8 +9,8 @@ from rest_framework.test import APITestCase
 
 from apps.users.models import Biker, City, Customer, Suburb
 
-from .models import Package, PackageStatus
-from .services.package_assignment import assign_pending_packages
+from ..models import Package, PackageStatus
+from ..services.package_assignment import assign_pending_packages
 
 
 class AutomaticPackageAssignmentTests(APITestCase):
@@ -80,6 +82,7 @@ class AutomaticPackageAssignmentTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertGreaterEqual(len(callbacks), 1)
+        self.assertEqual(_send_sms.call_args.args[2].amount, Decimal("10.00"))
         automatic_assignment.assert_called_once_with()
         package = Package.objects.get(id=response.data["package_id"])
         self.assertEqual(package.biker_id, biker.id)

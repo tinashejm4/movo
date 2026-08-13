@@ -279,8 +279,9 @@ class PackageViewSet(ViewSet):
             )
 
         serializer = PackageCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=False)
-        data = serializer.initial_data
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
         counterpart_phone = data.get("phone")
         counterpart_name = data.get("name")
         pickup_address = data.get("pickup_location")

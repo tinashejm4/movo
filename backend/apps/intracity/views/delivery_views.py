@@ -12,7 +12,7 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.package_assignment import assign_pending_packages
 from ..services.package_cancellation import can_cancel_package
-from ..services.package_access import package_initiator_user_id
+from ..services.package_access import package_user_can_cancel
 import logging
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
@@ -78,9 +78,10 @@ class DeliveryViewSet(ViewSet):
             id=package_id,
         )
 
-        if request.user.id != package_initiator_user_id(package):
+        invoice = getattr(package, "invoice", None)
+        if not package_user_can_cancel(package, invoice, request.user.id):
             return Response(
-                {"error": "Only the customer who initiated the order can cancel it"},
+                {"error": "Only the customer who initiated or pays for the order can cancel it"},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -89,7 +90,6 @@ class DeliveryViewSet(ViewSet):
             .order_by("-updated_at")
             .first()
         )
-        invoice = getattr(package, "invoice", None)
         current_status = latest_status.status if latest_status else None
         if not can_cancel_package(
             invoice=invoice,

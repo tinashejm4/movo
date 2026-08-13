@@ -7,10 +7,11 @@ from rest_framework.test import APITestCase
 
 from apps.users.models import City, Customer
 
-from .models import Invoice, Package, PackageStatus
-from .services.package_access import (
+from ..models import Invoice, Package, PackageStatus
+from ..services.package_access import (
     package_initiator_user_id,
     package_payer_user_id,
+    package_user_can_cancel,
 )
 
 
@@ -44,6 +45,18 @@ class PackageAccessServiceTests(APITestCase):
             package_payer_user_id(package, SimpleNamespace(is_pay_forward=True)),
             1,
         )
+
+    def test_initiator_and_payer_can_cancel(self):
+        package = SimpleNamespace(
+            sender=SimpleNamespace(user_id=1),
+            receiver=SimpleNamespace(user_id=2),
+            is_sender_initiated=True,
+        )
+        invoice = SimpleNamespace(is_pay_forward=True)
+
+        self.assertTrue(package_user_can_cancel(package, invoice, 1))
+        self.assertTrue(package_user_can_cancel(package, invoice, 2))
+        self.assertFalse(package_user_can_cancel(package, invoice, 3))
 
 
 class PackagePaymentAccessTests(APITestCase):
@@ -107,6 +120,19 @@ class PackagePaymentAccessTests(APITestCase):
     def test_receiver_initiator_can_cancel(self):
         self.package.is_sender_initiated = False
         self.package.save(update_fields=["is_sender_initiated"])
+        self.client.force_authenticate(user=self.receiver_user)
+
+        response = self.client.post(
+            reverse("intracity_cancel_order"),
+            {"package_id": self.package.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_forwarded_payer_can_cancel(self):
+        self.invoice.is_pay_forward = True
+        self.invoice.save(update_fields=["is_pay_forward"])
         self.client.force_authenticate(user=self.receiver_user)
 
         response = self.client.post(

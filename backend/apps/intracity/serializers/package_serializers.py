@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 
+
 class ErrorResponseSerializer(serializers.Serializer):
     error = serializers.CharField()
 
@@ -54,7 +55,9 @@ class PackageListRequestSerializer(serializers.Serializer):
     collected_at = serializers.DateTimeField(allow_null=True)
     delivered_at = serializers.DateTimeField(allow_null=True)
     slug = serializers.CharField()
+    incoming = serializers.BooleanField()
     package_created_at = serializers.DateTimeField()
+
 
 PackageRequestSerializer = PackageDetailRequestSerializer
 PackageDetailSerializer = PackageDetailRequestSerializer
@@ -70,6 +73,7 @@ class PackageListSerializer(serializers.Serializer):
 class PackageDetailQuerySerializer(serializers.Serializer):
     package_id = serializers.IntegerField(required=False)
     package_slug = serializers.CharField(required=False)
+
 
 class CurrentPackageStatusSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
@@ -101,6 +105,9 @@ class PackageCreateSerializer(serializers.Serializer):
     is_fast_delivery = serializers.BooleanField(required=False, default=False)
     is_pay_forward = serializers.BooleanField(required=False, default=False)
     is_sender_initiated = serializers.BooleanField(required=False, default=True)
+
+
+
 
 
 class PackagePriceRequestSerializer(serializers.Serializer):
