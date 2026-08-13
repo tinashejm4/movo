@@ -55,7 +55,7 @@ class PackageListRequestSerializer(serializers.Serializer):
     collected_at = serializers.DateTimeField(allow_null=True)
     delivered_at = serializers.DateTimeField(allow_null=True)
     slug = serializers.CharField()
-    incoming = serializers.BooleanField()
+    is_incoming = serializers.BooleanField(allow_null=True)
     package_created_at = serializers.DateTimeField()
 
 

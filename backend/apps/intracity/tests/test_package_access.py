@@ -10,12 +10,36 @@ from apps.users.models import City, Customer
 from ..models import Invoice, Package, PackageStatus
 from ..services.package_access import (
     package_initiator_user_id,
+    package_is_incoming_for_user,
     package_payer_user_id,
     package_user_can_cancel,
 )
 
 
 class PackageAccessServiceTests(APITestCase):
+    def test_package_direction_is_relative_to_user_role(self):
+        sender = SimpleNamespace(user_id=1)
+        receiver = SimpleNamespace(user_id=2)
+        package = SimpleNamespace(
+            sender=sender,
+            receiver=receiver,
+            is_sender_initiated=True,
+        )
+
+        self.assertFalse(package_is_incoming_for_user(package, 1))
+        self.assertTrue(package_is_incoming_for_user(package, 2))
+        self.assertIsNone(package_is_incoming_for_user(package, 3))
+
+        package.is_sender_initiated = False
+        self.assertFalse(package_is_incoming_for_user(package, 1))
+        self.assertTrue(package_is_incoming_for_user(package, 2))
+
+    def test_self_send_is_incoming(self):
+        customer = SimpleNamespace(user_id=1)
+        package = SimpleNamespace(sender=customer, receiver=customer)
+
+        self.assertTrue(package_is_incoming_for_user(package, 1))
+
     def test_initiator_and_payer_follow_the_package_payment_choice(self):
         sender = SimpleNamespace(user_id=1)
         receiver = SimpleNamespace(user_id=2)

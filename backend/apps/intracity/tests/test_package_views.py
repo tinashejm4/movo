@@ -13,23 +13,23 @@ class IntracityPackageListTests(APITestCase):
         self.city = City.objects.create(
             name="Harare", province="Harare", country="Zimbabwe"
         )
-        sender_user = User.objects.create_user(
+        self.sender_user = User.objects.create_user(
             username="0779000011", password="pass"
         )
-        receiver_user = User.objects.create_user(
+        self.receiver_user = User.objects.create_user(
             username="0779000012", password="pass"
         )
-        driver_user = User.objects.create_user(
+        self.driver_user = User.objects.create_user(
             username="rider-with-number",
             password="pass",
             first_name="Rider",
             last_name="One",
         )
-        self.sender = Customer.objects.create(user=sender_user)
-        self.receiver = Customer.objects.create(user=receiver_user)
-        self.driver = Biker.objects.create(user=driver_user)
-        Contact.objects.create(user=driver_user, phone_number="0779000013")
-        self.client.force_authenticate(user=sender_user)
+        self.sender = Customer.objects.create(user=self.sender_user)
+        self.receiver = Customer.objects.create(user=self.receiver_user)
+        self.driver = Biker.objects.create(user=self.driver_user)
+        Contact.objects.create(user=self.driver_user, phone_number="0779000013")
+        self.client.force_authenticate(user=self.sender_user)
 
     def test_package_list_returns_compact_payload_shape(self):
         package = Package.objects.create(
@@ -53,11 +53,51 @@ class IntracityPackageListTests(APITestCase):
         self.assertEqual(result["slug"], package.slug)
         self.assertEqual(result["pickup_address"], "Avondale")
         self.assertEqual(result["dropoff_address"], "Borrowdale")
+        self.assertFalse(result["is_incoming"])
+        self.assertNotIn("incoming", result)
         self.assertIn("package_created_at", result)
         self.assertIn("collected_at", result)
         self.assertIn("delivered_at", result)
         self.assertNotIn("driver_number", result)
         self.assertNotIn("can_cancel", result)
+
+    def test_package_list_direction_is_relative_to_requesting_user(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            biker=self.driver,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="111111",
+            receiver_code="222222",
+            is_sender_initiated=False,
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+
+        self.client.force_authenticate(user=self.receiver_user)
+        response = self.client.get(reverse("intracity_package_list"))
+        self.assertTrue(response.data["results"][0]["is_incoming"])
+
+        self.client.force_authenticate(user=self.driver_user)
+        response = self.client.get(reverse("intracity_package_list"))
+        self.assertIsNone(response.data["results"][0]["is_incoming"])
+
+    def test_self_send_is_incoming_in_package_list(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.sender,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Avondale",
+            sender_code="333333",
+            receiver_code="444444",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+
+        response = self.client.get(reverse("intracity_package_list"))
+
+        self.assertTrue(response.data["results"][0]["is_incoming"])
 
     def test_package_status_includes_assigned_driver_number(self):
         package = Package.objects.create(

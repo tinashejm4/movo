@@ -28,7 +28,10 @@ from ..services.package_pricing import (
     calculate_package_price,
 )
 from ..services.package_cancellation import can_cancel_package
-from ..services.package_access import package_initiator_user_id
+from ..services.package_access import (
+    package_initiator_user_id,
+    package_is_incoming_for_user,
+)
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from apps.users.utils import is_valid_zimbabwean_number
 
@@ -209,6 +212,7 @@ class PackageViewSet(ViewSet):
         response_data = [
             self.build_package_list_payload(
                 package=package,
+                requester_user_id=request.user.id,
                 status_records=status_records_by_package_id.get(package.id, []),
             )
             for package in page_packages
@@ -325,7 +329,9 @@ class PackageViewSet(ViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    def build_package_list_payload(self, package, status_records=None):
+    def build_package_list_payload(
+        self, package, requester_user_id, status_records=None
+    ):
         if status_records is None:
             status_records = list(
                 PackageStatus.objects.filter(package=package).order_by("updated_at")
@@ -347,6 +353,9 @@ class PackageViewSet(ViewSet):
                 "collected_at": collected_at,
                 "delivered_at": delivered_at,
                 "slug": package.slug,
+                "is_incoming": package_is_incoming_for_user(
+                    package, requester_user_id
+                ),
                 "package_created_at": package.added_at,
             }
         )
