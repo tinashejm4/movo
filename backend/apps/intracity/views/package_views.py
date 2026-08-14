@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import Suburb
+from apps.users.views import request_otp
 from ..serializers.package_serializers import (
     CurrentPackageStatusSerializer,
     ErrorResponseSerializer,
@@ -35,6 +36,9 @@ from ..services.package_access import (
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from apps.users.utils import is_valid_zimbabwean_number
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 class PackageListPagination(PageNumberPagination):
     page_size = 10
@@ -51,9 +55,63 @@ class PackageViewSet(ViewSet):
             "package_detail",
         }:
             return [IsAuthenticated()]
-        if self.action in {"package_price", "search_suburb", "current_status"}:
+        if self.action in {
+            "package_price",
+            "search_suburb",
+            "current_status",
+            "sender_receiver_login",
+        }:
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    @extend_schema(
+        tags=["intracity/Packages"],
+        responses={
+            201: OpenApiResponse(description="OTP sent"),
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="package_id is required"
+            ),
+            404: OpenApiResponse(
+                ErrorResponseSerializer, description="Package not found"
+            ),
+        },
+    )
+    def sender_receiver_login(self, request):
+        package_id = request.data.get("package_id")
+        last_4_digits = (request.data.get("last_digits") or "").strip()
+        if not package_id:
+            return Response(
+                {"error": "package_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+        package = (
+            Package.objects.select_related("sender__user", "receiver__user")
+            .filter(id=package_id)
+            .first()
+        )
+        if not package:
+            return Response(
+                {"error": "Package not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        
+
+        customer = package.receiver if package.is_sender_initiated else package.sender
+
+        if last_4_digits == customer.user.username[-4:]:
+            request_otp(customer.user.username)
+            return Response(
+                {"message": "OTP sent to the registered phone number",
+                 "phone_number": customer.user.username,},
+                status=status.HTTP_201_CREATED,
+            )
+        else:
+            return Response(
+                {"error": "Last 4 digits of phone number do not match"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @extend_schema(
         tags=["intracity/Packages"],
@@ -380,7 +438,7 @@ class PackageViewSet(ViewSet):
 
         receiver_id = package.receiver.id
         sender_id = package.sender.id
-        initiator_id = package_initiator_user_id(package)
+        initiator_id = package.sender.id if package.is_sender_initiated else package.receiver.id
 
         serializer = PackageDetailSerializer(
             {

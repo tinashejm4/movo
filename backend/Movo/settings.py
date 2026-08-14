@@ -96,6 +96,7 @@ CSRF_TRUSTED_ORIGINS = [
 CORS_ALLOWED_ORIGINS = [
     "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
     "https://movo.co.zw",
+    "http://localhost:3000",
 ]
 
 REST_FRAMEWORK = {

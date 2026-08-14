@@ -11,6 +11,7 @@ package_list = PackageViewSet.as_view({"get": "list_packages"})
 package_status = PackageViewSet.as_view({"get": "current_status"})
 search_suburb = PackageViewSet.as_view({"get": "search_suburb"})
 package_price = PackageViewSet.as_view({"post": "package_price"})
+sender_receiver_login = PackageViewSet.as_view({"post": "sender_receiver_login"})
 
 assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packages"})
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
@@ -28,6 +29,11 @@ paynow_notify = PaymentViewSet.as_view({"get": "paynow_notify"})
 
 
 urlpatterns = [
+    path(
+        "sender-receiver-login/",
+        sender_receiver_login,
+        name="intracity_sender_receiver_login",
+    ),
     path("create-package/", 
          package_create, 
          name="intracity_create_package"
