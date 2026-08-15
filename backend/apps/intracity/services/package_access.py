@@ -3,9 +3,7 @@ def package_initiator(package):
 
 
 def package_payer(package, invoice):
-    if not invoice.is_pay_forward:
-        return package_initiator(package)
-    return package.receiver if package.is_sender_initiated else package.sender
+    return package.receiver if invoice.is_pay_forward else package.sender
 
 
 def package_initiator_user_id(package):
