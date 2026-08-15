@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from django.urls import reverse
 from ..models import Invoice, EcocashPayment, PaynowPayment
-from ..services.package_access import package_payer_user_id
+from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
 from apps.users.models import Customer
 from drf_spectacular.utils import OpenApiResponse, extend_schema, OpenApiParameter
 from ..serializers.payment_serializer import (
@@ -80,6 +80,7 @@ class PaymentViewSet(ViewSet):
         },
     )
 
+    @transaction.atomic
     def paynow_payment(self, request):
         serializer = PaynowPaymentRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -98,7 +99,7 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invoice = Invoice.objects.select_related(
+        invoice = Invoice.objects.select_for_update().select_related(
             "package__sender__user", "package__receiver__user"
         ).filter(id=invoice_id).first()
 
@@ -112,7 +113,7 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if request.user.id != package_payer_user_id(invoice.package, invoice):
+        if not invoice_user_is_payer(invoice, request.user.id):
             return Response(
                 {"error": "Only the customer responsible for this invoice can pay it"},
                 status=status.HTTP_403_FORBIDDEN,
@@ -124,6 +125,14 @@ class PaymentViewSet(ViewSet):
                     {
                         "error": "Invoice is already paid",
                     }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not invoice_user_can_pay(invoice, request.user.id):
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {"error": "Payment cannot be started for this invoice"}
                 ).data,
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -145,16 +154,14 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        paynow_payment = PaynowPayment(
-            customer=Customer.objects.get(user=request.user),
-            invoice=invoice,
-            phone_number=phone_number,
-            reference=ref,
-            poll_url=response.poll_url,
-        )
-        paynow_payment.save()
-
         if response.success:
+            PaynowPayment.objects.create(
+                customer=Customer.objects.get(user=request.user),
+                invoice=invoice,
+                phone_number=phone_number,
+                reference=ref,
+                poll_url=response.poll_url,
+            )
             invoice.payment_method = "PaynowEcocash"
             invoice.save(update_fields=["payment_method"])
             return Response(
@@ -289,7 +296,7 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invoice = Invoice.objects.select_related(
+        invoice = Invoice.objects.select_for_update().select_related(
             "package__sender__user", "package__receiver__user"
         ).filter(id=invoice_id).first()
 
@@ -303,10 +310,26 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if request.user.id != package_payer_user_id(invoice.package, invoice):
+        if not invoice_user_is_payer(invoice, request.user.id):
             return Response(
                 {"error": "Only the customer responsible for this invoice can pay it"},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if invoice.is_paid:
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {"error": "Invoice is already paid"}
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not invoice_user_can_pay(invoice, request.user.id):
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {"error": "Payment cannot be started for this invoice"}
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         headers={

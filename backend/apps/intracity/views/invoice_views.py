@@ -10,6 +10,7 @@ from ..serializers.invoice_serializer import (
     InvoiceDetailsResponseSerializer,
     InvoiceErrorResponseSerializer,
 )
+from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
 
 class InvoiceViewSet(ViewSet):
     permission_classes = [IsAuthenticated]
@@ -48,7 +49,11 @@ class InvoiceViewSet(ViewSet):
             package.receiver.user_id,
         }:
             return Response(
-                {"error": "You do not have access to this invoice"},
+                {
+                    "error": "You do not have access to this invoice",
+                    "is_payer": False,
+                    "can_pay": False,
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
         invoice = Invoice.objects.filter(package=package).first()
@@ -58,6 +63,8 @@ class InvoiceViewSet(ViewSet):
                 "invoice_id": invoice.id if invoice else None,
                 "is_paid": invoice.is_paid if invoice else None,
                 "is_pay_forward": invoice.is_pay_forward if invoice else None,
+                "is_payer": invoice_user_is_payer(invoice, request.user.id),
+                "can_pay": invoice_user_can_pay(invoice, request.user.id),
                 "invoice_amount": invoice.amount if invoice else None,
                 "invoice_amount_zig": invoice.amount_in_zig() if invoice else None,
             }
