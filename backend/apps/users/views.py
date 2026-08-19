@@ -4,7 +4,7 @@ import logging
 from django.utils import timezone
 from django.conf import settings
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets
@@ -51,7 +51,7 @@ class CityViewSet(viewsets.ModelViewSet):
 class SuburbViewSet(viewsets.ModelViewSet):
     queryset = Suburb.objects.all()
     serializer_class = SuburbSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
 
 class StaffProfileView(APIView):

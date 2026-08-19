@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from apps.intercity.models import Batch
-from .models import InterCitySale, Account, Charge, EndOfDayBalance, Expense, ExpenseType, FundsTransfer,  TransportExpense
+from .models import InterCitySale, Account, Charge, EndOfDayBalance, Expense, ExpenseAccount, FundsTransfer, TransportExpense
 
 
 def _parse_date(value):
@@ -242,11 +242,11 @@ class CloseAccountForDayView(APIView):
         )
 
 
-class ExpenseTypesView(APIView):
+class ExpenseAccountView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
 
     def get(self, request):
-        types = ExpenseType.objects.all().order_by("name", "id")
+        types = ExpenseAccount.objects.all().order_by("name", "id")
         rows = [{"id": row.id, "name": row.name} for row in types]
         return Response(rows, status=status.HTTP_200_OK)
 
@@ -306,8 +306,8 @@ class ExpensesView(APIView):
             )
 
         try:
-            expense_type = ExpenseType.objects.get(id=expense_type_id)
-        except ExpenseType.DoesNotExist:
+            expense_type = ExpenseAccount.objects.get(id=expense_type_id)
+        except ExpenseAccount.DoesNotExist:
             return Response({"error": "Expense type not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -397,7 +397,7 @@ class TransportExpensesView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        expense_type = ExpenseType.objects.filter(id=1).first()
+        expense_type = ExpenseAccount.objects.filter(id=1).first()
         if not expense_type:
             return Response(
                 {"error": "Default transport expense type (id=1) was not found"},

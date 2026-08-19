@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from django.urls import reverse
 from ..models import Invoice, EcocashPayment, PaynowPayment
+from apps.bookkeeping.models import IntracitySale, Account
 from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
 from apps.users.models import Customer
 from drf_spectacular.utils import OpenApiResponse, extend_schema, OpenApiParameter
@@ -255,6 +256,13 @@ class PaymentViewSet(ViewSet):
             invoice.is_paid = True
             invoice.paid_at = timezone.now()
             invoice.save(update_fields=["is_paid", "paid_at"])
+
+            IntracitySale.objects.create(
+                account=Account.objects.get(name = "FBC", currency = "USD"),
+                invoice=invoice,
+                amount=invoice.amount,
+            )
+
             return Response(
                 PaynowPaymentProcessedResponseSerializer(
                     {

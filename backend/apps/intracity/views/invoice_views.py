@@ -1,16 +1,26 @@
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import City
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from ..models import Package, Invoice, Price
+from ..models import Package, Invoice, PaynowPayment, Price
 from ..serializers.invoice_serializer import (
     InvoiceDetailsQuerySerializer,
     InvoiceDetailsResponseSerializer,
     InvoiceErrorResponseSerializer,
 )
+from paynow import Paynow
+import os
 from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
+
+paynow = Paynow(
+        os.environ.get("PAYNOW_INTEGRATION_ID", ""),
+        os.environ.get("PAYNOW_INTEGRATION_KEY", ""),
+        "http://google.com",
+        "http://google.com",
+        )
 
 class InvoiceViewSet(ViewSet):
     permission_classes = [IsAuthenticated]
@@ -57,6 +67,27 @@ class InvoiceViewSet(ViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
         invoice = Invoice.objects.filter(package=package).first()
+
+        if invoice and not invoice.is_paid:
+            last_saved_payment = PaynowPayment.objects.filter(invoice=invoice, is_successful=False).order_by('added_at').last()
+            # try polling again
+            poll_url = last_saved_payment.poll_url if last_saved_payment else None
+            if not poll_url:
+                return Response(
+                    {"error": "Poll URL not found for the provided Paynow payment"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            poll_response = paynow.check_transaction_status(poll_url)
+
+            if poll_response.status == "paid":
+                last_saved_payment.is_successful = True
+                last_saved_payment.paid_at = timezone.now()
+                last_saved_payment.save(update_fields=["is_successful", "paid_at"])
+                invoice.is_paid = True
+                invoice.paid_at = timezone.now()
+                invoice.save(update_fields=["is_paid", "paid_at"])
+
         serializer = InvoiceDetailsResponseSerializer(
             {
                 "package_id": package.id,
