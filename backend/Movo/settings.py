@@ -77,6 +77,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -287,7 +288,12 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STATIC_URL = "/static/"
+STATIC_DIRS = [
+    "staticfiles/admin",
+    "staticfiles/rest_framework",
+]
 
 TXTCONSOLE_SEND_OTP = os.environ.get("TXTCONSOLE_SEND_OTP", "0") == "1"
 TXTCONSOLE_BASE_URL = os.environ.get("TXTCONSOLE_BASE_URL", "https://api.txtconsole.com/v1")
