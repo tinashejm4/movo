@@ -1,7 +1,13 @@
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+
+from django.utils import timezone
 
 from ..models import EcocashPayment, PackageStatus, PaynowPayment
 from .package_access import package_payer_user_id
+
+
+PAYMENT_ATTEMPT_PENDING_WINDOW = timedelta(minutes=2)
 
 
 def invoice_user_is_payer(invoice, user_id):
@@ -29,6 +35,7 @@ def invoice_has_pending_payment(invoice):
         "invoice": invoice,
         "is_successful": False,
         "paid_at__isnull": True,
+        "created_at__gte": timezone.now() - PAYMENT_ATTEMPT_PENDING_WINDOW,
     }
     return (
         EcocashPayment.objects.filter(**unresolved_attempt).exists()
@@ -49,7 +56,7 @@ def package_is_cancelled(package):
     return latest_status == "Cancelled"
 
 
-def invoice_user_can_pay(invoice, user_id):
+def invoice_user_can_pay(invoice, user_id, *, payment_pending=None):
     if not invoice_user_is_payer(invoice, user_id):
         return False
     if invoice.is_paid or package_is_cancelled(invoice.package):
@@ -61,4 +68,6 @@ def invoice_user_can_pay(invoice, user_id):
     except (InvalidOperation, TypeError, ValueError):
         return False
 
-    return not invoice_has_pending_payment(invoice)
+    if payment_pending is None:
+        payment_pending = invoice_has_pending_payment(invoice)
+    return not payment_pending

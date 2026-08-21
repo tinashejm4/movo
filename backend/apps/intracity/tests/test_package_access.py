@@ -1,13 +1,21 @@
+from datetime import timedelta
 from types import SimpleNamespace
 
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.users.models import City, Customer
 
-from ..models import EcocashPayment, Invoice, Package, PackageStatus
+from ..models import (
+    EcocashPayment,
+    Invoice,
+    Package,
+    PackageStatus,
+    PaynowPayment,
+)
 from ..services.package_access import (
     package_initiator_user_id,
     package_is_incoming_for_user,
@@ -195,7 +203,25 @@ class PackagePaymentAccessTests(APITestCase):
 
         self.assertTrue(response.data["is_payer"])
         self.assertFalse(response.data["can_pay"])
+        self.assertTrue(response.data["payment_pending"])
         self.assertFalse(invoice_user_can_pay(self.invoice, self.sender_user.id))
+
+    def test_expired_payment_attempt_allows_an_unpaid_invoice_to_be_retried(self):
+        attempt = PaynowPayment.objects.create(
+            customer=self.sender,
+            invoice=self.invoice,
+            phone_number="263771234567",
+            reference="REF-EXPIRED-ATTEMPT",
+        )
+        PaynowPayment.objects.filter(pk=attempt.pk).update(
+            created_at=timezone.now() - timedelta(minutes=3)
+        )
+
+        response = self.get_invoice_details(self.sender_user)
+
+        self.assertFalse(response.data["is_paid"])
+        self.assertFalse(response.data["payment_pending"])
+        self.assertTrue(response.data["can_pay"])
 
     def test_missing_invoice_returns_false_payment_permissions(self):
         package_without_invoice = Package.objects.create(
