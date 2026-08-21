@@ -363,9 +363,7 @@ class CustomerRegisterLoginView(APIView):
 
         try:
             otp = OTP.objects.get(username=username, otp_code=otp_code)
-            logger.warning(f"OTP found for username: {username}, otp_code: {otp_code}")
         except OTP.DoesNotExist:
-            logger.warning(f"Invalid OTP for username: {username}, otp_code: {otp_code}")
             return Response(
                 {"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
             )

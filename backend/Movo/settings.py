@@ -34,7 +34,10 @@ if ENV_PATH.exists():
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-&0(kf@(d@8piy=dijxhn=z#+_$q=))mu48cius#sd6g9+@#h&y"
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "django-insecure-&0(kf@(d@8piy=dijxhn=z#+_$q=))mu48cius#sd6g9+@#h&y",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", "1") == "1"
@@ -187,10 +190,10 @@ def _build_channel_redis_url() -> str:
 
 CHANNEL_REDIS_URL = _build_channel_redis_url()
 CHANNEL_REDIS_SOCKET_TIMEOUT = float(
-    os.environ.get("CHANNEL_REDIS_SOCKET_TIMEOUT", "15")
+    os.environ.get("CHANNEL_REDIS_SOCKET_TIMEOUT", "5")
 )
 CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT = float(
-    os.environ.get("CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT", "15")
+    os.environ.get("CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT", "5")
 )
 CHANNEL_REDIS_HEALTH_CHECK_INTERVAL = int(
     os.environ.get("CHANNEL_REDIS_HEALTH_CHECK_INTERVAL", "30")
@@ -199,26 +202,24 @@ CHANNEL_REDIS_RETRY_ON_TIMEOUT = (
     os.environ.get("CHANNEL_REDIS_RETRY_ON_TIMEOUT", "1") == "1"
 )
 
-if USE_INMEMORY_CHANNEL_LAYER:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer",
-        }
-    }
-else:
+AZURE_REDIS_CONN_STR = os.getenv("AZURE_REDIS_CONNECTIONSTRING")
+
+if AZURE_REDIS_CONN_STR:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [
-                    {
-                        "address": CHANNEL_REDIS_URL,
-                        "socket_timeout": CHANNEL_REDIS_SOCKET_TIMEOUT,
-                        "socket_connect_timeout": CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT,
-                        "health_check_interval": CHANNEL_REDIS_HEALTH_CHECK_INTERVAL,
-                        "retry_on_timeout": CHANNEL_REDIS_RETRY_ON_TIMEOUT,
-                    }
-                ]
+                "hosts": [AZURE_REDIS_CONN_STR],
+            },
+        },
+    }
+else:
+    # Fallback for local Docker/development environment
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [("127.0.0.1", 6379)],
             },
         },
     }

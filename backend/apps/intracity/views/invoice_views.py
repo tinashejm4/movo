@@ -68,9 +68,11 @@ class InvoiceViewSet(ViewSet):
             )
         invoice = Invoice.objects.filter(package=package).first()
 
-        if invoice and not invoice.is_paid:
-            last_saved_payment = PaynowPayment.objects.filter(invoice=invoice, is_successful=False).order_by('added_at').last()
-            # try polling again
+        last_saved_payment = PaynowPayment.objects.filter(invoice=invoice, is_successful=False).order_by('created_at')
+
+        if invoice and not invoice.is_paid and last_saved_payment.exists():
+            last_saved_payment = last_saved_payment.last()
+            # try polling the last saved payment to check if it has been paid
             poll_url = last_saved_payment.poll_url if last_saved_payment else None
             if not poll_url:
                 return Response(
