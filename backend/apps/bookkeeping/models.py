@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 class Account(models.Model):
     name = models.CharField(max_length = 50)
     branch = models.ForeignKey(Branch, on_delete = models.CASCADE, blank = True, null = True)
-    owner = models.ForeignKey(User, on_delete = models.SET_NULL, null = True)
+    owner = models.ForeignKey(User, on_delete = models.SET_NULL, null = True, blank = True)
     currency = models.CharField(max_length = 10, default = "USD")
     description = models.TextField(blank = True, null = True)
     number = models.CharField(max_length = 20, blank = True, null = True)
@@ -31,15 +31,7 @@ class InterCitySale(models.Model):
     def __str__(self):
         return f"${self.amount:00} for InterCity Invoice {self.intercity_invoice}"
 
-# class Receipt(models.Model):
-#     sale = models.OneToOneField(Sale, on_delete = models.CASCADE)
-#     image = models.ImageField(upload_to = 'receipts/')
-#     added_at = models.DateField(auto_now_add = True)
-
-#     def __str__(self):
-#         return f"Receipt for Sale {self.sale}"
-
-class ExpenseType(models.Model):
+class ExpenseAccount(models.Model):
     name = models.CharField(max_length = 50)
     description = models.TextField(blank = True, null = True)
     added_at = models.DateField(auto_now_add = True)
@@ -49,7 +41,7 @@ class ExpenseType(models.Model):
 
 class Expense(models.Model):
     account = models.ForeignKey(Account, on_delete = models.CASCADE)
-    expense_type = models.ForeignKey(ExpenseType, on_delete = models.CASCADE)
+    expense_type = models.ForeignKey(ExpenseAccount, on_delete = models.CASCADE)
     amount = models.FloatField(default = 0)
     comment = models.TextField(blank = True, null = True)
     added_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True)
@@ -57,7 +49,15 @@ class Expense(models.Model):
 
     def __str__(self):
         return f"${self.amount:00} for Account {self.account}"
-    
+
+class Receipt(models.Model):
+    sale = models.OneToOneField(Expense, on_delete = models.CASCADE)
+    image = models.ImageField(upload_to = 'receipts/')
+    added_at = models.DateField(auto_now_add = True)
+
+    def __str__(self):
+        return f"Receipt for Expense {self.sale}"
+
 class ExpenseReceipt(models.Model):
     expense = models.ForeignKey(Expense, on_delete = models.CASCADE)
     image = models.ImageField(upload_to = 'transport_expense_receipts/')
@@ -69,7 +69,7 @@ class ExpenseReceipt(models.Model):
 # this model is for transport expenses which are linked to a specific batch of packages, unlike general expenses which are linked to a branch account
 class TransportExpense(models.Model):
     account = models.ForeignKey(Account, on_delete = models.CASCADE)
-    expense_type = models.ForeignKey(ExpenseType, on_delete = models.CASCADE)
+    expense_type = models.ForeignKey(ExpenseAccount, on_delete = models.CASCADE)
     Batch = models.ForeignKey(Batch, on_delete = models.CASCADE)
     transport_category = models.CharField(max_length = 50, default = "fuel")
     amount = models.FloatField(default = 0)

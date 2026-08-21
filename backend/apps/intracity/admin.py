@@ -1,10 +1,11 @@
 from django.contrib import admin
-from .models import SuburbSearchLog, Package, PackageStatus, Invoice,Price
+from .models import SuburbSearchLog, Package, PackageStatus, Invoice,Price, PaynowPayment
 
 # Register your models here.
 admin.site.register(PackageStatus)
 admin.site.register(Invoice)
 admin.site.register(Price)
+admin.site.register(PaynowPayment)
 
 
 @admin.register(Package)

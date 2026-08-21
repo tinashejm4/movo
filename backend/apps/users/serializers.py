@@ -72,10 +72,8 @@ class CitySerializer(serializers.ModelSerializer):
             "id",
         ]
 
-class SuburbSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Suburb
-        fields = ["id", "name", "city", 'x_pos', 'y_pos']
-        read_only_fields = [
-            "id",
-        ]
+class SuburbSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField()
+    city = serializers.PrimaryKeyRelatedField(queryset=City.objects.all())
+    city_name = serializers.CharField(source='city.name', read_only=True)

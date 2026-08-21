@@ -1,21 +1,30 @@
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import City
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from ..models import Package, Invoice, Price
+from ..models import Package, Invoice, PaynowPayment, Price
 from ..serializers.invoice_serializer import (
     InvoiceDetailsQuerySerializer,
     InvoiceDetailsResponseSerializer,
     InvoiceErrorResponseSerializer,
 )
+from paynow import Paynow
+import os
 from ..services.invoice_payment import (
     invoice_has_pending_payment,
     invoice_user_can_pay,
     invoice_user_is_payer,
 )
 
+paynow = Paynow(
+        os.environ.get("PAYNOW_INTEGRATION_ID", ""),
+        os.environ.get("PAYNOW_INTEGRATION_KEY", ""),
+        "http://google.com",
+        "http://google.com",
+        )
 
 class InvoiceViewSet(ViewSet):
     permission_classes = [IsAuthenticated]

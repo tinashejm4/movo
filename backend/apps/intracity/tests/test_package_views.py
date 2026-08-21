@@ -1,11 +1,83 @@
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework.response import Response
 
 from apps.users.models import Biker, City, Contact, Customer
 
 from ..models import Invoice, Package, PackageStatus
+
+
+class SenderReceiverLoginTests(APITestCase):
+    def setUp(self):
+        self.city = City.objects.create(
+            name="Mutare", province="Manicaland", country="Zimbabwe"
+        )
+        self.sender_user = User.objects.create_user(
+            username="0779000031", password="pass"
+        )
+        self.receiver_user = User.objects.create_user(
+            username="0779000032", password="pass"
+        )
+        self.sender = Customer.objects.create(user=self.sender_user)
+        self.receiver = Customer.objects.create(user=self.receiver_user)
+
+    def create_package(self, is_sender_initiated):
+        return Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Sakubva",
+            dropoff_address="Dangamvura",
+            sender_code="111111",
+            receiver_code="222222",
+            is_sender_initiated=is_sender_initiated,
+        )
+
+    @patch("apps.intracity.views.package_views.request_otp")
+    def test_public_endpoint_sends_otp_to_receiver_for_sender_initiated_package(
+        self, mock_request_otp
+    ):
+        package = self.create_package(is_sender_initiated=True)
+        mock_request_otp.return_value = Response({"otp": "123456"}, status=201)
+
+        response = self.client.post(
+            reverse("intracity_sender_receiver_login"),
+            {"package_id": package.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        mock_request_otp.assert_called_once_with(self.receiver_user.username)
+
+    @patch("apps.intracity.views.package_views.request_otp")
+    def test_public_endpoint_sends_otp_to_sender_for_receiver_initiated_package(
+        self, mock_request_otp
+    ):
+        package = self.create_package(is_sender_initiated=False)
+        mock_request_otp.return_value = Response({"otp": "123456"}, status=201)
+
+        response = self.client.post(
+            reverse("intracity_sender_receiver_login"),
+            {"package_id": package.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        mock_request_otp.assert_called_once_with(self.sender_user.username)
+
+    def test_endpoint_returns_not_found_for_unknown_package(self):
+        response = self.client.post(
+            reverse("intracity_sender_receiver_login"),
+            {"package_id": 99999},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["error"], "Package not found")
 
 
 class IntracityPackageListTests(APITestCase):
