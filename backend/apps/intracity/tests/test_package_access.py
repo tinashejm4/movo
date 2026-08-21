@@ -1,5 +1,6 @@
 from datetime import timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.urls import reverse
@@ -192,7 +193,7 @@ class PackagePaymentAccessTests(APITestCase):
         self.assertTrue(response.data["is_payer"])
         self.assertFalse(response.data["can_pay"])
 
-    def test_pending_payment_attempt_prevents_duplicate_payment(self):
+    def test_pending_payment_attempt_remains_payable(self):
         EcocashPayment.objects.create(
             customer=self.sender,
             invoice=self.invoice,
@@ -202,9 +203,9 @@ class PackagePaymentAccessTests(APITestCase):
         response = self.get_invoice_details(self.sender_user)
 
         self.assertTrue(response.data["is_payer"])
-        self.assertFalse(response.data["can_pay"])
+        self.assertTrue(response.data["can_pay"])
         self.assertTrue(response.data["payment_pending"])
-        self.assertFalse(invoice_user_can_pay(self.invoice, self.sender_user.id))
+        self.assertTrue(invoice_user_can_pay(self.invoice, self.sender_user.id))
 
     def test_expired_payment_attempt_allows_an_unpaid_invoice_to_be_retried(self):
         attempt = PaynowPayment.objects.create(
@@ -350,7 +351,12 @@ class PackagePaymentAccessTests(APITestCase):
             "Payment cannot be started for this invoice",
         )
 
-    def test_pending_attempt_prevents_starting_another_payment(self):
+    @patch("apps.intracity.views.payments_views.paynow.send_mobile")
+    def test_pending_attempt_allows_starting_another_payment(self, send_mobile):
+        send_mobile.return_value = SimpleNamespace(
+            success=True,
+            poll_url="https://example.com/paynow/poll/retry",
+        )
         EcocashPayment.objects.create(
             customer=self.sender,
             invoice=self.invoice,
@@ -364,8 +370,6 @@ class PackagePaymentAccessTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["error"],
-            "Payment cannot be started for this invoice",
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["message"], "Payment request successful")
+        self.assertTrue(PaynowPayment.objects.filter(invoice=self.invoice).exists())

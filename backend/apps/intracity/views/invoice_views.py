@@ -71,11 +71,7 @@ class InvoiceViewSet(ViewSet):
                 "is_paid": invoice.is_paid if invoice else None,
                 "is_pay_forward": invoice.is_pay_forward if invoice else None,
                 "is_payer": invoice_user_is_payer(invoice, request.user.id),
-                "can_pay": invoice_user_can_pay(
-                    invoice,
-                    request.user.id,
-                    payment_pending=payment_pending,
-                ),
+                "can_pay": invoice_user_can_pay(invoice, request.user.id),
                 "payment_pending": payment_pending,
                 "invoice_amount": invoice.amount if invoice else None,
                 "invoice_amount_zig": invoice.amount_in_zig() if invoice else None,

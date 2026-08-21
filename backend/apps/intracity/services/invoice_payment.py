@@ -56,7 +56,7 @@ def package_is_cancelled(package):
     return latest_status == "Cancelled"
 
 
-def invoice_user_can_pay(invoice, user_id, *, payment_pending=None):
+def invoice_user_can_pay(invoice, user_id):
     if not invoice_user_is_payer(invoice, user_id):
         return False
     if invoice.is_paid or package_is_cancelled(invoice.package):
@@ -68,6 +68,4 @@ def invoice_user_can_pay(invoice, user_id, *, payment_pending=None):
     except (InvalidOperation, TypeError, ValueError):
         return False
 
-    if payment_pending is None:
-        payment_pending = invoice_has_pending_payment(invoice)
-    return not payment_pending
+    return True
