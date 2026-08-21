@@ -1,13 +1,22 @@
+from datetime import timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.users.models import City, Customer
 
-from ..models import EcocashPayment, Invoice, Package, PackageStatus
+from ..models import (
+    EcocashPayment,
+    Invoice,
+    Package,
+    PackageStatus,
+    PaynowPayment,
+)
 from ..services.package_access import (
     package_initiator_user_id,
     package_is_incoming_for_user,
@@ -184,7 +193,7 @@ class PackagePaymentAccessTests(APITestCase):
         self.assertTrue(response.data["is_payer"])
         self.assertFalse(response.data["can_pay"])
 
-    def test_pending_payment_attempt_prevents_duplicate_payment(self):
+    def test_pending_payment_attempt_remains_payable(self):
         EcocashPayment.objects.create(
             customer=self.sender,
             invoice=self.invoice,
@@ -194,8 +203,26 @@ class PackagePaymentAccessTests(APITestCase):
         response = self.get_invoice_details(self.sender_user)
 
         self.assertTrue(response.data["is_payer"])
-        self.assertFalse(response.data["can_pay"])
-        self.assertFalse(invoice_user_can_pay(self.invoice, self.sender_user.id))
+        self.assertTrue(response.data["can_pay"])
+        self.assertTrue(response.data["payment_pending"])
+        self.assertTrue(invoice_user_can_pay(self.invoice, self.sender_user.id))
+
+    def test_expired_payment_attempt_allows_an_unpaid_invoice_to_be_retried(self):
+        attempt = PaynowPayment.objects.create(
+            customer=self.sender,
+            invoice=self.invoice,
+            phone_number="263771234567",
+            reference="REF-EXPIRED-ATTEMPT",
+        )
+        PaynowPayment.objects.filter(pk=attempt.pk).update(
+            created_at=timezone.now() - timedelta(minutes=3)
+        )
+
+        response = self.get_invoice_details(self.sender_user)
+
+        self.assertFalse(response.data["is_paid"])
+        self.assertFalse(response.data["payment_pending"])
+        self.assertTrue(response.data["can_pay"])
 
     def test_missing_invoice_returns_false_payment_permissions(self):
         package_without_invoice = Package.objects.create(
@@ -324,7 +351,12 @@ class PackagePaymentAccessTests(APITestCase):
             "Payment cannot be started for this invoice",
         )
 
-    def test_pending_attempt_prevents_starting_another_payment(self):
+    @patch("apps.intracity.views.payments_views.paynow.send_mobile")
+    def test_pending_attempt_allows_starting_another_payment(self, send_mobile):
+        send_mobile.return_value = SimpleNamespace(
+            success=True,
+            poll_url="https://example.com/paynow/poll/retry",
+        )
         EcocashPayment.objects.create(
             customer=self.sender,
             invoice=self.invoice,
@@ -338,8 +370,6 @@ class PackagePaymentAccessTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["error"],
-            "Payment cannot be started for this invoice",
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["message"], "Payment request successful")
+        self.assertTrue(PaynowPayment.objects.filter(invoice=self.invoice).exists())

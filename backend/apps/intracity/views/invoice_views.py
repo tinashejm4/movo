@@ -13,7 +13,11 @@ from ..serializers.invoice_serializer import (
 )
 from paynow import Paynow
 import os
-from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
+from ..services.invoice_payment import (
+    invoice_has_pending_payment,
+    invoice_user_can_pay,
+    invoice_user_is_payer,
+)
 
 paynow = Paynow(
         os.environ.get("PAYNOW_INTEGRATION_ID", ""),
@@ -63,31 +67,12 @@ class InvoiceViewSet(ViewSet):
                     "error": "You do not have access to this invoice",
                     "is_payer": False,
                     "can_pay": False,
+                    "payment_pending": False,
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
         invoice = Invoice.objects.filter(package=package).first()
-
-        if invoice and not invoice.is_paid:
-            last_saved_payment = PaynowPayment.objects.filter(invoice=invoice, is_successful=False).order_by('added_at').last()
-            # try polling again
-            poll_url = last_saved_payment.poll_url if last_saved_payment else None
-            if not poll_url:
-                return Response(
-                    {"error": "Poll URL not found for the provided Paynow payment"},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-
-            poll_response = paynow.check_transaction_status(poll_url)
-
-            if poll_response.status == "paid":
-                last_saved_payment.is_successful = True
-                last_saved_payment.paid_at = timezone.now()
-                last_saved_payment.save(update_fields=["is_successful", "paid_at"])
-                invoice.is_paid = True
-                invoice.paid_at = timezone.now()
-                invoice.save(update_fields=["is_paid", "paid_at"])
-
+        payment_pending = invoice_has_pending_payment(invoice)
         serializer = InvoiceDetailsResponseSerializer(
             {
                 "package_id": package.id,
@@ -96,6 +81,7 @@ class InvoiceViewSet(ViewSet):
                 "is_pay_forward": invoice.is_pay_forward if invoice else None,
                 "is_payer": invoice_user_is_payer(invoice, request.user.id),
                 "can_pay": invoice_user_can_pay(invoice, request.user.id),
+                "payment_pending": payment_pending,
                 "invoice_amount": invoice.amount if invoice else None,
                 "invoice_amount_zig": invoice.amount_in_zig() if invoice else None,
             }
