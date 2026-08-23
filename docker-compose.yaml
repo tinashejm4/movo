@@ -17,12 +17,13 @@ services:
       DB_PASSWORD: movo_password
       DB_HOST: db
       DB_PORT: "5432"
-      CHANNEL_REDIS_HOST: redis
-      CHANNEL_REDIS_PORT: "6379"
-      CHANNEL_REDIS_SOCKET_TIMEOUT: "15"
-      CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT: "15"
+      CHANNEL_REDIS_HOST: "redis-16444.c282.east-us-mz.azure.cloud.redislabs.com"
+      CHANNEL_REDIS_PORT: "16444"
+      CHANNEL_REDIS_SOCKET_TIMEOUT: "60"
+      CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT: "60"
       CHANNEL_REDIS_HEALTH_CHECK_INTERVAL: "30"
       CHANNEL_REDIS_RETRY_ON_TIMEOUT: "1"
+      CHANNEL_REDIS_USE_SSL: "1"
     depends_on:
       db:
         condition: service_started

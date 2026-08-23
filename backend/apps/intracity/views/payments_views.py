@@ -141,6 +141,7 @@ class PaymentViewSet(ViewSet):
         ref = f"REF-{invoice.package.slug}-{random.randint(100000, 999999)}"
         payment = paynow.create_payment(ref, "movo@example.com")
         payment.add("Online Payment", invoice.amount)
+        logger.info(f"Initiating Paynow payment for invoice {invoice.id} with reference {ref} and amount {invoice.amount}. Phone number: {phone_number}")
         try:
             response = paynow.send_mobile(payment, f"0{phone_number}", "ecocash")
         except (HTTPError, URLError) as e:
@@ -153,6 +154,7 @@ class PaymentViewSet(ViewSet):
                 ).data,
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+        logger.info(f"Paynow response for invoice {invoice.id}: {self._to_json_safe(response.__dict__)}")
 
         if response.success:
             PaynowPayment.objects.create(
@@ -175,7 +177,7 @@ class PaymentViewSet(ViewSet):
             return Response(
                 PaymentProviderErrorResponseSerializer(
                     {
-                        "error": "Payment request failed",
+                        "error": self._to_json_safe(response.__dict__)["data"]["error"],
                         "details": "Paynow Error",
                     }
                 ).data,
