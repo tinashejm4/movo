@@ -18,6 +18,7 @@ from ..models import (
     PaynowPayment,
 )
 from ..services.package_access import (
+    package_confirmation_code_for_user,
     package_initiator_user_id,
     package_is_incoming_for_user,
     package_payer_user_id,
@@ -27,6 +28,40 @@ from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_pay
 
 
 class PackageAccessServiceTests(APITestCase):
+    def test_confirmation_code_is_selected_by_participant_role(self):
+        package = SimpleNamespace(
+            sender=SimpleNamespace(user_id=1),
+            receiver=SimpleNamespace(user_id=2),
+            sender_code="111111",
+            receiver_code="222222",
+        )
+
+        self.assertEqual(package_confirmation_code_for_user(package, 1), "111111")
+        self.assertEqual(package_confirmation_code_for_user(package, 2), "222222")
+        self.assertIsNone(package_confirmation_code_for_user(package, 3))
+
+    def test_self_send_confirmation_code_follows_delivery_stage(self):
+        customer = SimpleNamespace(user_id=1)
+        package = SimpleNamespace(
+            sender=customer,
+            receiver=customer,
+            sender_code="111111",
+            receiver_code="222222",
+        )
+
+        self.assertEqual(
+            package_confirmation_code_for_user(
+                package, 1, current_status="Pending"
+            ),
+            "111111",
+        )
+        self.assertEqual(
+            package_confirmation_code_for_user(
+                package, 1, current_status="In Transit"
+            ),
+            "222222",
+        )
+
     def test_package_direction_is_relative_to_user_role(self):
         sender = SimpleNamespace(user_id=1)
         receiver = SimpleNamespace(user_id=2)

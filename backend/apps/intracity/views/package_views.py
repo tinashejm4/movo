@@ -29,6 +29,7 @@ from ..services.package_pricing import (
 )
 from ..services.package_cancellation import can_cancel_package
 from ..services.package_access import (
+    package_confirmation_code_for_user,
     package_initiator_user_id,
     package_is_incoming_for_user,
 )
@@ -261,7 +262,12 @@ class PackageViewSet(ViewSet):
         )
 
         return Response(
-            self.build_package_payload(package, invoice, status_records),
+            self.build_package_payload(
+                package,
+                requester_user_id=request.user.id,
+                invoice=invoice,
+                status_records=status_records,
+            ),
             status=status.HTTP_200_OK,
         )
 
@@ -325,7 +331,12 @@ class PackageViewSet(ViewSet):
         )
 
         return Response(
-            self.build_package_payload(package, invoice, status_records),
+            self.build_package_payload(
+                package,
+                requester_user_id=request.user.id,
+                invoice=invoice,
+                status_records=status_records,
+            ),
             status=status.HTTP_201_CREATED,
         )
 
@@ -361,7 +372,9 @@ class PackageViewSet(ViewSet):
         )
         return serializer.data
 
-    def build_package_payload(self, package, invoice=None, status_records=None):
+    def build_package_payload(
+        self, package, requester_user_id, invoice=None, status_records=None
+    ):
         if status_records is None:
             status_records = list(
                 PackageStatus.objects.filter(package=package).order_by("updated_at")
@@ -407,8 +420,11 @@ class PackageViewSet(ViewSet):
                 "driver_number": (
                     self.get_phone_number(package.biker.user) if package.biker else None
                 ),
-                "receiver_code": package.receiver_code,
-                "sender_code": package.sender_code,
+                "confirmation_code": package_confirmation_code_for_user(
+                    package,
+                    requester_user_id,
+                    current_status=current_status,
+                ),
                 "comments": package.comments,
                 "is_sender_initiated": package.is_sender_initiated,
                 "package_created_at": package.added_at,

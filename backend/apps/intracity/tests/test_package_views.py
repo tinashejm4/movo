@@ -169,6 +169,51 @@ class IntracityPackageListTests(APITestCase):
         )
         self.assertEqual(response.data["initiator_id"], self.receiver.user_id)
 
+    def test_package_detail_returns_only_sender_confirmation_code_to_sender(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="123456",
+            receiver_code="654321",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+
+        response = self.client.get(
+            reverse("intracity_package_detail"),
+            {"package_id": package.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["confirmation_code"], "123456")
+        self.assertNotIn("sender_code", response.data)
+        self.assertNotIn("receiver_code", response.data)
+
+    def test_package_detail_returns_only_receiver_confirmation_code_to_receiver(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="123456",
+            receiver_code="654321",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+        self.client.force_authenticate(user=self.receiver.user)
+
+        response = self.client.get(
+            reverse("intracity_package_detail"),
+            {"package_id": package.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["confirmation_code"], "654321")
+        self.assertNotIn("sender_code", response.data)
+        self.assertNotIn("receiver_code", response.data)
+
 
 class IntracityPaidPackageCancellationTests(APITestCase):
     def setUp(self):
