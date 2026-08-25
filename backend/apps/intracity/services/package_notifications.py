@@ -24,10 +24,10 @@ def build_package_booking_message(package, invoice):
         )
         if invoice.is_pay_forward:
             return " ".join(
-                [message, f"Amount Due on Delivery: ${invoice.amount:.2f}"]
+                [message, f"Amount Due on Delivery: ${invoice.amount:.2f}. movo.co.zw/check?p={package.id}"]
             )
         return " ".join(
-            [message, "Please be ready to receive your delivery."]
+            [message, f"movo.co.zw/check?p={package.id}"]
         )
 
     address = _truncate_address(package.pickup_address, address_char_len)
@@ -40,9 +40,9 @@ def build_package_booking_message(package, invoice):
     )
     if not invoice.is_pay_forward:
         return " ".join(
-            [message, f"Amount Due on Collection: ${invoice.amount:.2f}"]
+            [message, f"Amount Due on Collection: ${invoice.amount:.2f}. movo.co.zw/check?p={package.id}"]
         )
-    return " ".join([message, "Please prepare the package for collection."])
+    return " ".join([message, f"movo.co.zw/check?p={package.id}"])
 
 
 def send_package_booking_sms(phone_number, package, invoice):

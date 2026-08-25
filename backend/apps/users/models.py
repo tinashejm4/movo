@@ -78,6 +78,8 @@ class Suburb(models.Model):
     name = models.CharField(max_length=100)
     x_pos = models.DecimalField(max_digits=10, decimal_places=3)
     y_pos = models.DecimalField(max_digits=10, decimal_places=3)
+    x_coord = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    y_coord = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
 
     class Meta:
         constraints = [

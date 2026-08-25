@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from django.urls import reverse
 from ..models import Invoice, EcocashPayment, PaynowPayment
+from apps.bookkeeping.models import IntracitySale, Account
 from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
 from apps.users.models import Customer
 from drf_spectacular.utils import OpenApiResponse, extend_schema, OpenApiParameter
@@ -49,7 +50,7 @@ class PaymentViewSet(ViewSet):
     
     @staticmethod
     def _is_econet_number(phone_number):
-        return phone_number[4] == "7" or phone_number[4] == "8"
+        return phone_number[1] == "7" or phone_number[1] == "8"
 
     @staticmethod
     def _to_json_safe(value):
@@ -87,7 +88,7 @@ class PaymentViewSet(ViewSet):
         invoice_id = serializer.validated_data["invoice_id"]
         phone_number = serializer.validated_data["phone_number"]
 
-        phone_number = f"263{normalize_zimbabwean_number(phone_number)}"
+        phone_number = normalize_zimbabwean_number(phone_number)
 
         if not is_valid_zimbabwean_number(phone_number) or not self._is_econet_number(phone_number):
             return Response(
@@ -140,9 +141,8 @@ class PaymentViewSet(ViewSet):
         ref = f"REF-{invoice.package.slug}-{random.randint(100000, 999999)}"
         payment = paynow.create_payment(ref, "movo@example.com")
         payment.add("Online Payment", invoice.amount)
-
         try:
-            response = paynow.send_mobile(payment, phone_number, "ecocash")
+            response = paynow.send_mobile(payment, f"0{phone_number}", "ecocash")
         except (HTTPError, URLError) as e:
             return Response(
                 PaymentProviderErrorResponseSerializer(
@@ -215,8 +215,10 @@ class PaymentViewSet(ViewSet):
 
         if not invoice:
             return Response(
-                {"error": "Invoice not found"},
-                status=status.HTTP_404_NOT_FOUND,
+                PaymentErrorResponseSerializer(
+                    {"error": "invoice_id is required"},
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if invoice.is_paid:
@@ -254,6 +256,13 @@ class PaymentViewSet(ViewSet):
             invoice.is_paid = True
             invoice.paid_at = timezone.now()
             invoice.save(update_fields=["is_paid", "paid_at"])
+
+            IntracitySale.objects.create(
+                account=Account.objects.get(name = "FBC", currency = "USD"),
+                invoice=invoice,
+                amount=invoice.amount,
+            )
+
             return Response(
                 PaynowPaymentProcessedResponseSerializer(
                     {
@@ -271,7 +280,7 @@ class PaymentViewSet(ViewSet):
             return Response(
                 PaymentErrorResponseSerializer(
                 {
-                    "description": "Payment not successful",
+                    "error": "Payment not successful",
                 }
                 ).data,
                 status=status.HTTP_400_BAD_REQUEST,
@@ -418,10 +427,6 @@ class PaymentViewSet(ViewSet):
     @transaction.atomic
     def ecocash_notify(self, request):
         payload = request.data if isinstance(request.data, dict) else {}
-        logger.warning(
-            "Received EcoCash notify payload: %s",
-            self._to_json_safe(payload),
-        )
 
         response_code = str(payload.get("ecocashResponseCode", "")).strip().upper()
         merchant_reference = str(payload.get("orginalMerchantReference", "")).strip()
@@ -464,12 +469,6 @@ class PaymentViewSet(ViewSet):
             ecocash_payment.provider_response = payload
             ecocash_payment.save(update_fields=["is_successful", "paid_at", "provider_response"])
 
-        logger.info(
-            "EcoCash notify success. invoice_id=%s response_code=%s merchant_reference=%s",
-            invoice.id,
-            response_code,
-            merchant_reference,
-        )
 
         return Response(
             {

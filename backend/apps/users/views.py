@@ -4,7 +4,7 @@ import logging
 from django.utils import timezone
 from django.conf import settings
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets
@@ -51,7 +51,7 @@ class CityViewSet(viewsets.ModelViewSet):
 class SuburbViewSet(viewsets.ModelViewSet):
     queryset = Suburb.objects.all()
     serializer_class = SuburbSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
 
 class StaffProfileView(APIView):
@@ -245,84 +245,86 @@ class OTPCreateView(APIView):
         },
     )
     def post(self, request):
-        data = request.data
-        username = data.get("phone_number")
+        return request_otp(request.data.get("phone_number"))
 
-        if not username:
-            return Response(
-                {"error": "Phone number is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
-        if not is_valid_zimbabwean_number(username):
-            return Response(
-                {"error": "Invalid Zimbabwean phone number"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+def request_otp(username):
 
-        # Generate a 6-digit OTP.
-        otp_code = f"{secrets.randbelow(1_000_000):06d}"
-
-        # Create or update the OTP for the given username
-        otp, _created = OTP.objects.update_or_create(
-            username=normalize_zimbabwean_number(username),
-            defaults={"otp_code": otp_code},
+    if not username:
+        return Response(
+            {"error": "Phone number is required"},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
-        if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
-            return Response(
-                {"error": "SMS provider credentials are missing"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    if not is_valid_zimbabwean_number(username):
+        return Response(
+            {"error": "Invalid Zimbabwean phone number"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Generate a 6-digit OTP.
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+
+    # Create or update the OTP for the given username
+    otp, _created = OTP.objects.update_or_create(
+        username=normalize_zimbabwean_number(username),
+        defaults={"otp_code": otp_code},
+    )
+
+    if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
+        return Response(
+            {"error": "SMS provider credentials are missing"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": "Basic "
+        + base64.b64encode(
+            f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()
+        ).decode(),
+    }
+
+    payload = {
+        "destination": f"263{normalize_zimbabwean_number(username)}",
+        "text": f"Your Movo OTP is {otp_code}. It expires in 5 minutes.",
+        "source": settings.TXTCONSOLE_SOURCE,
+    }
+
+    if settings.TXTCONSOLE_RECEIPT_URL:
+        payload["receiptURL"] = settings.TXTCONSOLE_RECEIPT_URL
+
+    try:
+        provider_response = requests.post(
+            settings.TXTCONSOLE_SMS_URL + "/sms",
+            json=payload,
+            headers=headers,
+            timeout=20,
+        )
+
+        if provider_response.status_code >= 400:
+            try:
+                error_details = provider_response.json()
+            except ValueError:
+                error_details = {"message": provider_response.text}
+            logger.warning(
+                "txtConsole OTP send failed for %s: %s",
+                username,
+                error_details,
             )
-
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "authorization": "Basic "
-            + base64.b64encode(
-                f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()
-            ).decode(),
-        }
-
-        payload = {
-            "destination": f"263{normalize_zimbabwean_number(username)}",
-            "text": f"Your Movo OTP is {otp_code}. It expires in 5 minutes.",
-            "source": settings.TXTCONSOLE_SOURCE,
-        }
-
-        if settings.TXTCONSOLE_RECEIPT_URL:
-            payload["receiptURL"] = settings.TXTCONSOLE_RECEIPT_URL
-
-        try:
-            provider_response = requests.post(
-                settings.TXTCONSOLE_SMS_URL + "/sms",
-                json=payload,
-                headers=headers,
-                timeout=20,
-            )
-
-            if provider_response.status_code >= 400:
-                try:
-                    error_details = provider_response.json()
-                except ValueError:
-                    error_details = {"message": provider_response.text}
-                logger.warning(
-                    "txtConsole OTP send failed for %s: %s",
-                    username,
-                    error_details,
-                )
-                return Response(
-                    {"error": "Failed to send OTP SMS"},
-                    status=status.HTTP_502_BAD_GATEWAY,
-                )
-        except requests.RequestException as exc:
-            logger.exception("txtConsole OTP send exception for %s", username)
             return Response(
-                {"error": "SMS provider request failed"},
+                {"error": "Failed to send OTP SMS"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+    except requests.RequestException as exc:
+        logger.exception("txtConsole OTP send exception for %s", username)
+        return Response(
+            {"error": "SMS provider request failed"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
 
-        return Response({"otp": otp_code}, status=status.HTTP_201_CREATED)
+    return Response({"otp": otp_code}, status=status.HTTP_201_CREATED)
 
 
 class CustomerRegisterLoginView(APIView):
@@ -357,10 +359,13 @@ class CustomerRegisterLoginView(APIView):
                 {"error": "phone_number and otp_code are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        logger.warning("Otp code received for username: %s, otp_code: %s", username, otp_code)
 
         try:
             otp = OTP.objects.get(username=username, otp_code=otp_code)
+            logger.warning(f"OTP found for username: {username}, otp_code: {otp_code}")
         except OTP.DoesNotExist:
+            logger.warning(f"Invalid OTP for username: {username}, otp_code: {otp_code}")
             return Response(
                 {"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
             )
