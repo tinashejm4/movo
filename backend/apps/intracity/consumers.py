@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -12,10 +13,26 @@ logger = logging.getLogger(__name__)
 
 
 class PackageAssignmentConsumer(AsyncWebsocketConsumer):
+    subscribed_to_groups = False
+
     async def connect(self):
+        try:
+            await self._connect()
+        except Exception as exc:
+            logger.exception("WebSocket connect failed unexpectedly")
+            try:
+                await self.close(
+                    code=4500,
+                    reason=f"{exc.__class__.__name__}: {exc}",
+                )
+            except Exception:
+                pass
+
+    async def _connect(self):
         self.user = self.scope.get("user")
         if not self.user or not self.user.is_authenticated:
-            await self.close(code=4401)
+            reason = self.scope.get("auth_error") or "Authentication required."
+            await self.close(code=4401, reason=reason)
             return
 
         self.global_group = "package_assignments"
@@ -23,7 +40,10 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
         if self.package_id is not None and not await self._can_access_package(
             self.package_id
         ):
-            await self.close(code=4403)
+            await self.close(
+                code=4403,
+                reason="Not authorized to access this package.",
+            )
             return
 
         self.group_name = (
@@ -32,14 +52,19 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
             else self.global_group
         )
 
+        # Accept first so a slow/unreachable channel layer never blocks the handshake.
+        await self.accept()
+
         self.subscribed_to_groups = False
         try:
-            await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await asyncio.wait_for(
+                self.channel_layer.group_add(self.group_name, self.channel_name),
+                timeout=5,
+            )
             self.subscribed_to_groups = True
         except Exception as exc:
             logger.warning("WebSocket group subscribe failed: %s", exc)
 
-        await self.accept()
         await self.send(
             text_data=json.dumps(
                 {
@@ -54,11 +79,19 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
         )
 
     async def disconnect(self, close_code):
+        logger.info(
+            "WebSocket disconnect: group=%s close_code=%s",
+            getattr(self, "group_name", None),
+            close_code,
+        )
         if not self.subscribed_to_groups:
             return
 
         try:
-            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            await asyncio.wait_for(
+                self.channel_layer.group_discard(self.group_name, self.channel_name),
+                timeout=5,
+            )
         except Exception as exc:
             logger.warning("WebSocket group unsubscribe failed: %s", exc)
 

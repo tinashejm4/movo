@@ -8,7 +8,9 @@ from .views import (
     LogoutView,
     TokenRefreshView,
     CustomerRegisterLoginView,
+    ImportAreasView,
     CityViewSet,SuburbViewSet,
+    DriverLoginView,
 )
 
 router = DefaultRouter()
@@ -31,4 +33,8 @@ urlpatterns = [
         name="customer_register_login",
     ),
     path("otp/", OTPCreateView.as_view(), name="customer_otp"),
+    path("driver/login/", DriverLoginView.as_view(), name="driver_token_obtain_pair"),
+    path("driver/refresh/", TokenRefreshView.as_view(), name="driver_token_refresh"),
+    path("driver/logout/", LogoutView.as_view(), name="driver_token_logout"),
+    path("suburbs/import-areas/", ImportAreasView.as_view(), name="import_areas"),
 ] + router.urls

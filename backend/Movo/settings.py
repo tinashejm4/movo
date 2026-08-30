@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,7 +34,10 @@ if ENV_PATH.exists():
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-&0(kf@(d@8piy=dijxhn=z#+_$q=))mu48cius#sd6g9+@#h&y"
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "django-insecure-&0(kf@(d@8piy=dijxhn=z#+_$q=))mu48cius#sd6g9+@#h&y",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", "1") == "1"
@@ -151,6 +154,10 @@ USE_INMEMORY_CHANNEL_LAYER = (
 
 CHANNEL_REDIS_HOST = os.environ.get("CHANNEL_REDIS_HOST", "127.0.0.1")
 CHANNEL_REDIS_PORT = int(os.environ.get("CHANNEL_REDIS_PORT", "6379"))
+CHANNEL_REDIS_USERNAME = os.environ.get("CHANNEL_REDIS_USERNAME", "")
+CHANNEL_REDIS_PASSWORD = os.environ.get("CHANNEL_REDIS_PASSWORD", "")
+CHANNEL_REDIS_DB = os.environ.get("CHANNEL_REDIS_DB", "0")
+CHANNEL_REDIS_USE_SSL = os.environ.get("CHANNEL_REDIS_USE_SSL", "0") == "1"
 
 
 def _build_channel_redis_url() -> str:
@@ -182,15 +189,28 @@ def _build_channel_redis_url() -> str:
         auth_segment = f":{quote(password, safe='')}@" if password else ""
         return f"{scheme}://{auth_segment}{host_port}/0"
 
-    return f"redis://{CHANNEL_REDIS_HOST}:{CHANNEL_REDIS_PORT}/0"
+    scheme = "rediss" if CHANNEL_REDIS_USE_SSL else "redis"
+    username = quote(CHANNEL_REDIS_USERNAME, safe="") if CHANNEL_REDIS_USERNAME else ""
+    password = quote(CHANNEL_REDIS_PASSWORD, safe="") if CHANNEL_REDIS_PASSWORD else ""
+    if username and password:
+        auth_segment = f"{username}:{password}@"
+    elif password:
+        auth_segment = f":{password}@"
+    else:
+        auth_segment = ""
+
+    return f"{scheme}://{auth_segment}{CHANNEL_REDIS_HOST}:{CHANNEL_REDIS_PORT}/{CHANNEL_REDIS_DB}"
 
 
 CHANNEL_REDIS_URL = _build_channel_redis_url()
+
+parsed_channel_redis = urlparse(CHANNEL_REDIS_URL)
+
 CHANNEL_REDIS_SOCKET_TIMEOUT = float(
-    os.environ.get("CHANNEL_REDIS_SOCKET_TIMEOUT", "15")
+    os.environ.get("CHANNEL_REDIS_SOCKET_TIMEOUT", "60")
 )
 CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT = float(
-    os.environ.get("CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT", "15")
+    os.environ.get("CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT", "60")
 )
 CHANNEL_REDIS_HEALTH_CHECK_INTERVAL = int(
     os.environ.get("CHANNEL_REDIS_HEALTH_CHECK_INTERVAL", "30")
@@ -203,7 +223,7 @@ if USE_INMEMORY_CHANNEL_LAYER:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
-        }
+        },
     }
 else:
     CHANNEL_LAYERS = {
@@ -215,10 +235,10 @@ else:
                         "address": CHANNEL_REDIS_URL,
                         "socket_timeout": CHANNEL_REDIS_SOCKET_TIMEOUT,
                         "socket_connect_timeout": CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT,
-                        "health_check_interval": CHANNEL_REDIS_HEALTH_CHECK_INTERVAL,
                         "retry_on_timeout": CHANNEL_REDIS_RETRY_ON_TIMEOUT,
+                        "health_check_interval": CHANNEL_REDIS_HEALTH_CHECK_INTERVAL,
                     }
-                ]
+                ],
             },
         },
     }
@@ -294,6 +314,9 @@ STATIC_DIRS = [
     "staticfiles/admin",
     "staticfiles/rest_framework",
 ]
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 TXTCONSOLE_SEND_OTP = os.environ.get("TXTCONSOLE_SEND_OTP", "0") == "1"
 TXTCONSOLE_BASE_URL = os.environ.get("TXTCONSOLE_BASE_URL", "https://api.txtconsole.com/v1")

@@ -1,6 +1,10 @@
 import secrets
 import requests, base64
 import logging
+import json
+import math
+from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 from django.utils import timezone
 from django.conf import settings
 from drf_spectacular.utils import OpenApiResponse, extend_schema
@@ -26,7 +30,7 @@ from apps.users.serializers import (
     LogoutRequestSerializer,
     LogoutResponseSerializer,
 )
-from .models import OTP, City, Contact, Customer, Staff, Suburb
+from .models import OTP, Biker, City, Contact, Customer, Staff, Suburb
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.exceptions import TokenError
@@ -42,6 +46,18 @@ logger = logging.getLogger(__name__)
 CUSTOMER_DEFAULT_PASSWORD = "Pass@123"
 
 
+def _to_decimal_3(value: float) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+
+def _convert_to_cbd_relative_km(lat: float, lon: float, cbd_lat: float, cbd_lon: float):
+    """Convert latitude/longitude to local x/y kilometers relative to CBD."""
+    avg_lat = math.radians((lat + cbd_lat) / 2.0)
+    x_km = (lon - cbd_lon) * 111.320 * math.cos(avg_lat)
+    y_km = (lat - cbd_lat) * 110.574
+    return _to_decimal_3(x_km), _to_decimal_3(y_km)
+
+
 class CityViewSet(viewsets.ModelViewSet):
     queryset = City.objects.all()
     serializer_class = CitySerializer
@@ -52,6 +68,114 @@ class SuburbViewSet(viewsets.ModelViewSet):
     queryset = Suburb.objects.all()
     serializer_class = SuburbSerializer
     permission_classes = [AllowAny]
+
+
+class ImportAreasView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Users"],
+        responses={
+            200: OpenApiResponse(description="Areas imported successfully"),
+            400: OpenApiResponse(description="Invalid data in areas.json"),
+            404: OpenApiResponse(description="areas.json or CBD area not found"),
+        },
+    )
+    def post(self, request):
+        city_name = str(request.data.get("city", "Harare")).strip() or "Harare"
+        cbd_area_name = str(request.data.get("cbd_area", "CBD")).strip() or "CBD"
+
+        areas_path = Path(__file__).resolve().parents[2] / "areas.json"
+        if not areas_path.exists():
+            return Response(
+                {"error": f"areas.json not found at {areas_path}"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            areas = json.loads(areas_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return Response(
+                {"error": "areas.json is not valid JSON"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(areas, list):
+            return Response(
+                {"error": "areas.json must contain a JSON array"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cbd_record = next(
+            (
+                row
+                for row in areas
+                if str(row.get("Areas", "")).strip().lower() == cbd_area_name.lower()
+            ),
+            None,
+        )
+        if not cbd_record:
+            return Response(
+                {"error": f"CBD area '{cbd_area_name}' not found in areas.json"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            cbd_lat = float(cbd_record["x"])
+            cbd_lon = float(cbd_record["y"])
+        except (TypeError, ValueError, KeyError):
+            return Response(
+                {"error": "CBD area has invalid coordinate values"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        city, _ = City.objects.get_or_create(name=city_name)
+        created_count = 0
+        updated_count = 0
+        skipped_count = 0
+
+        for row in areas:
+            area_name = str(row.get("Areas", "")).strip()
+            if not area_name:
+                skipped_count += 1
+                continue
+
+            try:
+                lat = float(row["x"])
+                lon = float(row["y"])
+            except (TypeError, ValueError, KeyError):
+                skipped_count += 1
+                continue
+
+            x_pos, y_pos = _convert_to_cbd_relative_km(lat, lon, cbd_lat, cbd_lon)
+            defaults = {
+                "x_pos": x_pos,
+                "y_pos": y_pos,
+                "x_coord": Decimal(str(lat)),
+                "y_coord": Decimal(str(lon)),
+            }
+            _, created = Suburb.objects.update_or_create(
+                city=city,
+                name=area_name,
+                defaults=defaults,
+            )
+            if created:
+                created_count += 1
+            else:
+                updated_count += 1
+
+        return Response(
+            {
+                "message": "Areas imported successfully",
+                "city": city.name,
+                "cbd_area": cbd_area_name,
+                "created": created_count,
+                "updated": updated_count,
+                "skipped": skipped_count,
+                "total": len(areas),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class StaffProfileView(APIView):
@@ -245,8 +369,11 @@ class OTPCreateView(APIView):
         },
     )
     def post(self, request):
-        return request_otp(request.data.get("phone_number"))
-
+        request_otp(request.data.get("phone_number"))
+        return Response(
+            {"message": "OTP requested successfully"},
+            status=status.HTTP_201_CREATED,
+        )
 
 def request_otp(username):
 
@@ -363,9 +490,7 @@ class CustomerRegisterLoginView(APIView):
 
         try:
             otp = OTP.objects.get(username=username, otp_code=otp_code)
-            logger.warning(f"OTP found for username: {username}, otp_code: {otp_code}")
         except OTP.DoesNotExist:
-            logger.warning(f"Invalid OTP for username: {username}, otp_code: {otp_code}")
             return Response(
                 {"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -513,3 +638,61 @@ class CustomerProfileView(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class DriverLoginView(APIView):
+    authentication_classes = []
+
+    @extend_schema(
+        tags=["Users"],
+        request=StaffLoginRequestSerializer,
+        responses={
+            200: TokenPairResponseSerializer,
+            401: OpenApiResponse(
+                ErrorResponseSerializer, description="Invalid credentials"
+            ),
+            403: OpenApiResponse(ErrorResponseSerializer, description="Inactive user"),
+        },
+    )
+    def post(self, request):
+        data = request.data
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return Response(
+                {"error": "Username and password are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        username = normalize_zimbabwean_number(username.strip())
+        
+        user = authenticate(username=username, password=password)
+        if not user:
+            return Response(
+                {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+        biker = Biker.objects.filter(user=user).first()
+        if not biker:
+            return Response(
+                {"error": "Profile not biker profile"}, status=status.HTTP_404_NOT_FOUND
+            )
+        if not user.is_active:
+            return Response(
+                {
+                    "error": "User is locked out because all branch accounts were closed for the day."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        logger.makeRecord("info", f"{user.username} logged in", None, None, None, None, None)
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "username": user.username,
+            }
+        )
+

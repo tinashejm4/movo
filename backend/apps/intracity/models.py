@@ -60,6 +60,7 @@ class Package(models.Model):
 class PackageStatus(models.Model):
     status_choices = [
         ("Pending", "Pending"),
+        ("Assigned", "Assigned"),
         ("In Transit", "In Transit"),
         ("Delivered", "Delivered"),
         ("Cancelled", "Cancelled"),

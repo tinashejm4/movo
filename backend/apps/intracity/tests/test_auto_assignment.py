@@ -10,7 +10,7 @@ from rest_framework.test import APITestCase
 from apps.users.models import Biker, City, Customer, Suburb
 
 from ..models import Package, PackageStatus
-from ..services.package_assignment import assign_pending_packages
+from ..services.package_assignment import assign_pending_packages, is_biker_busy
 
 
 class AutomaticPackageAssignmentTests(APITestCase):
@@ -87,6 +87,7 @@ class AutomaticPackageAssignmentTests(APITestCase):
         package = Package.objects.get(id=response.data["package_id"])
         self.assertEqual(package.biker_id, biker.id)
         self.assertIsNotNone(package.assigned_at)
+        self.assertTrue(is_biker_busy(biker))
         publish_assignments.assert_called_once()
         payloads = publish_assignments.call_args.args[0]
         self.assertEqual(payloads[0]["package_id"], package.id)
@@ -124,3 +125,4 @@ class AutomaticPackageAssignmentTests(APITestCase):
         self.assertEqual(result["assigned_count"], 0)
         self.assertEqual(result["unassigned_count"], 1)
         publish_assignments.assert_not_called()
+

@@ -19,8 +19,14 @@ django_asgi_app = get_asgi_application()
 
 from channels.routing import ProtocolTypeRouter, URLRouter
 
-from apps.intracity.routing import websocket_urlpatterns
+from apps.intracity.routing import websocket_urlpatterns as intracity_websocket_urlpatterns
+from apps.transporters.routing import websocket_urlpatterns as transporter_websocket_urlpatterns
 from Movo.websocket_auth import JwtAuthMiddlewareStack
+
+
+websocket_urlpatterns = (
+    intracity_websocket_urlpatterns + transporter_websocket_urlpatterns
+)
 
 if settings.DEBUG:
     django_asgi_app = ASGIStaticFilesHandler(django_asgi_app)

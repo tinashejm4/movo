@@ -30,7 +30,7 @@ def health(request):
 
 def get_server_version(request):
     # You can replace this with your actual server version retrieval logic
-    server_version = "1.0.8"  # Example version
+    server_version = "1.0.15"  # Example version
     date = "20-08-2026"  # Example date
     change_log = [
         "Added version endpoint to retrieve server version and date.",
@@ -39,7 +39,6 @@ def get_server_version(request):
 
 app_urlpatterns = [
     path("api/users/", include("apps.users.urls")),
-    path("api/intercity/", include("apps.intercity.urls")),
     path("api/intracity/", include("apps.intracity.urls")),
     path("api/transporters/", include("apps.transporters.urls")),
     path("api/bookkeeping/", include("apps.bookkeeping.urls")),

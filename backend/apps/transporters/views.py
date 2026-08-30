@@ -3,11 +3,13 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from apps.intracity.models import Package, PackageStatus, Invoice
+from apps.intracity.services.package_assignment import assign_pending_packages
 from apps.bookkeeping.models import Account, IntracitySale
 from apps.intracity.views.delivery_views import DeliveryViewSet
 
@@ -20,6 +22,14 @@ from .serializers import (
     DropoffPackageResponseSerializer,
     ErrorResponseSerializer,
 )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def test_assign_pending_packages(request):
+    """Test-only endpoint for triggering automatic biker assignment."""
+    return Response(assign_pending_packages(), status=status.HTTP_200_OK)
+
 
 class TransporterView(ViewSet):
     permission_classes = [IsAuthenticated]
