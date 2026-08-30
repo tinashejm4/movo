@@ -124,15 +124,4 @@ class City(models.Model):
     def __str__(self):
         return f'{self.name}, {self.province}, {self.country}'
 
-class DriverDailySession(models.Model):
-    driver = models.ForeignKey('Biker', on_delete=models.CASCADE, related_name='daily_sessions')
-    date = models.DateField()
-    start_time = models.DateTimeField()
-    is_active = models.BooleanField(default=True)
-    end_time = models.DateTimeField(null=True, blank=True)
 
-    class Meta:
-        unique_together = ('driver', 'date')
-
-    def __str__(self):
-        return f'{self.driver.user.username} - {self.date}'

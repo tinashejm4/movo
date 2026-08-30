@@ -24,3 +24,18 @@ class DropoffPackageResponseSerializer(serializers.Serializer):
     status = serializers.CharField()
     delivered_at = serializers.DateTimeField()
 
+class ActivateDeactivateRequestSerializer(serializers.Serializer):
+    is_biker_activated = serializers.BooleanField()
+
+class ActivateDeactivateResponseSerializer(serializers.Serializer):
+    is_biker_activated = serializers.BooleanField()
+
+class CancelPackageRequestSerializer(serializers.Serializer):
+    package_id = serializers.IntegerField()
+    reason = serializers.CharField(required=False)
+
+class DailySalesResponseSerializer(serializers.Serializer):
+    total_sales = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+class CancelPackageResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
