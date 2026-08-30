@@ -30,7 +30,7 @@ class DeliveryViewSet(ViewSet):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        tags=["intracity/Delivery"],
+        tags=["Deliveries"],
         request=None,
         responses={
             200: AssignPendingPackagesResponseSerializer,
@@ -45,7 +45,7 @@ class DeliveryViewSet(ViewSet):
         return Response(assign_pending_packages(), status=status.HTTP_200_OK)
 
     @extend_schema(
-        tags=["intracity/Delivery"],
+        tags=["Deliveries"],
         request=CancelOrderRequestSerializer,
         responses={
             200: CancelOrderResponseSerializer,
@@ -120,7 +120,7 @@ class DeliveryViewSet(ViewSet):
         )
 
     @extend_schema(
-        tags=["intracity/Delivery"],
+        tags=["Deliveries"],
         parameters = [IsBikerAssignedRequestSerializer],
         responses={
             200: IsBikerAssignedResponseSerializer,

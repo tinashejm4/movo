@@ -93,7 +93,8 @@ class FundsTransfer(models.Model):
     to_account = models.ForeignKey(Account, on_delete = models.CASCADE, related_name="to_account")
     amount = models.FloatField(default = 0)
     comment = models.TextField(blank = True, null = True)
-    added_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True)
+    initiated_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True, related_name="initiated_by")
+    accepted_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True, related_name="transfer_accepted_by")
     added_at = models.DateField(auto_now_add = True)
 
     def __str__(self):

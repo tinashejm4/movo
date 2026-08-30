@@ -5,6 +5,7 @@ import json
 import math
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
 from drf_spectacular.utils import OpenApiResponse, extend_schema
@@ -29,8 +30,9 @@ from apps.users.serializers import (
     TokenRefreshResponseSerializer,
     LogoutRequestSerializer,
     LogoutResponseSerializer,
+    DriverProfileResponseSerializer
 )
-from .models import OTP, Biker, City, Contact, Customer, Staff, Suburb
+from .models import OTP, Biker, City, Contact, Customer, ProfileImage, Staff, Suburb
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.exceptions import TokenError
@@ -182,7 +184,7 @@ class StaffProfileView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Staff Stuff"],
         responses={
             200: StaffProfileResponseSerializer,
             404: OpenApiResponse(
@@ -212,7 +214,7 @@ class StaffLoginView(APIView):
     authentication_classes = []
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Staff Stuff"],
         request=StaffLoginRequestSerializer,
         responses={
             200: TokenPairResponseSerializer,
@@ -256,7 +258,7 @@ class TokenRefreshView(SimpleJWTTokenRefreshView):
     authentication_classes = []
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Customer Stuff"],
         request=TokenRefreshRequestSerializer,
         responses={
             200: TokenRefreshResponseSerializer,
@@ -311,7 +313,7 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Customer Stuff"],
         request=LogoutRequestSerializer,
         responses={
             200: LogoutResponseSerializer,
@@ -359,7 +361,7 @@ class OTPCreateView(APIView):
     authentication_classes = []
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Customer Stuff"],
         request=OTPCreateRequestSerializer,
         responses={
             201: OTPCreateResponseSerializer,
@@ -458,7 +460,7 @@ class CustomerRegisterLoginView(APIView):
     authentication_classes = []
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Customer Stuff"],
         request=CustomerRegisterLoginRequestSerializer,
         responses={
             200: TokenPairResponseSerializer,
@@ -546,7 +548,7 @@ class CustomerProfileView(viewsets.ModelViewSet):
         return Customer.objects.get(user=self.request.user)
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Customer Stuff"],
         responses={
             200: CustomerProfileResponseSerializer,
             404: OpenApiResponse(
@@ -644,7 +646,7 @@ class DriverLoginView(APIView):
     authentication_classes = []
 
     @extend_schema(
-        tags=["Users"],
+        tags=["Biker Stuff"],
         request=StaffLoginRequestSerializer,
         responses={
             200: TokenPairResponseSerializer,
@@ -696,3 +698,39 @@ class DriverLoginView(APIView):
             }
         )
 
+class DriverProfileView(APIView):
+    authentication_classes = []
+
+    @extend_schema(
+        tags=["Biker Stuff"],
+        responses={
+            200: DriverProfileResponseSerializer,
+            401: OpenApiResponse(
+                ErrorResponseSerializer, description="Invalid credentials"
+            ),
+            403: OpenApiResponse(ErrorResponseSerializer, description="Inactive user"),
+            404: OpenApiResponse(ErrorResponseSerializer, description="Biker Profile/Contact/Profile image not found"),
+        },
+    )
+    def get(self, request):
+        user = request.user
+        biker = Biker.objects.filter(user=user).first()
+        if not biker:
+            return Response(
+                {"error": "Biker Profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        contact = get_object_or_404(Contact, user=user)
+        profile_image = get_object_or_404(ProfileImage, user=user)
+
+        return Response(
+            {
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "username": user.username,
+                "phone_number": f"0{contact.phone_number}",
+                "profile_image": profile_image.profile_image.url,
+                "joined_on": biker.date_joined,
+            },
+            status=status.HTTP_200_OK,
+        )
