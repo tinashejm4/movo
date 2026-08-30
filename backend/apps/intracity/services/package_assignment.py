@@ -7,16 +7,23 @@ from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from apps.users.models import Biker, Contact,ProfileImage
+from apps.transporters.models import BikerDailySession
 
 from ..models import Package, PackageStatus
-
-
 
 logger = logging.getLogger(__name__)
 
 
 def is_biker_busy(biker):
     """Return whether a biker has a package awaiting collection or in transit."""
+    session = BikerDailySession.objects.filter(biker=biker, date=timezone.now().date())
+    if not session.exists():
+        return True
+
+    session = session.first()
+    if not session.is_active:
+        return True
+
     latest_status = (
         PackageStatus.objects.filter(package=OuterRef("pk"))
         .order_by("-updated_at", "-pk")

@@ -9,6 +9,7 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from apps.intracity.models import Package, PackageStatus, Invoice
+from apps.users.models import Suburb
 from apps.intracity.services.package_assignment import assign_pending_packages
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from .models import BikerDailySession
@@ -25,6 +26,7 @@ from .serializers import (
     CancelPackageRequestSerializer,
     CancelPackageResponseSerializer,
     DailySalesResponseSerializer,
+    OrderSummaryResponseSerializer
 )
 import logging
 
@@ -42,7 +44,7 @@ class TransporterView(ViewSet):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        tags=["transporters/Delivery"],
+        tags=["Biker Stuff"],
         request=ActivateDeactivateRequestSerializer,
         responses={
             200: ActivateDeactivateResponseSerializer,
@@ -80,9 +82,8 @@ class TransporterView(ViewSet):
             status=status.HTTP_200_OK,
         )
 
-    
     @extend_schema(
-        tags=["transporters/Delivery"],
+        tags=["Biker Stuff"],
         request=CancelPackageRequestSerializer,
         responses={
             200: CancelPackageResponseSerializer,
@@ -144,7 +145,7 @@ class TransporterView(ViewSet):
 
 
     @extend_schema(
-        tags=["transporters/Delivery"],
+        tags=["Biker Stuff"],
         request=PickupPackageRequestSerializer,
         responses={
             200: PickupPackageResponseSerializer,
@@ -231,7 +232,7 @@ class TransporterView(ViewSet):
         )
 
     @extend_schema(
-        tags=["transporters/Delivery"],
+        tags=["Biker Stuff"],
         request=DropoffPackageRequestSerializer,
         responses={
             200: DropoffPackageResponseSerializer,
@@ -349,7 +350,7 @@ class TransporterView(ViewSet):
         return None
 
     @extend_schema(
-        tags=["transporters/Delivery"],
+        tags=["Biker Stuff"],
         responses={
             200: DailySalesResponseSerializer,
             400: OpenApiResponse(
@@ -388,7 +389,7 @@ class TransporterView(ViewSet):
         )
 
     @extend_schema(
-    tags=["transporters/Delivery"],
+    tags=["Biker Stuff"],
     responses={
         200: DailySalesResponseSerializer,
         400: OpenApiResponse(
@@ -421,5 +422,58 @@ class TransporterView(ViewSet):
             accepted_by=request.user,
         )
 
+        return Response(
+            {"message": "End of day cash transfer completed successfully."},
+            status=status.HTTP_200_OK,
+        )
 
-    
+    @extend_schema(
+        tags=["Biker Stuff"],
+        responses={
+            200: OrderSummaryResponseSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Incorrect request parameters",
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="User is not assigned to this package",
+            ),
+        },
+    )
+    def order_summary(self, request):
+
+        packages = Package.objects.filter(driver=request.user, created_at__date=timezone.now().date())
+        
+        orders_data = []
+        total_sales = 0
+        for package in packages:
+            pickup_surbub = Suburb.objects.get(id=package.pickup_area.id)
+            dropoff_surbub = Suburb.objects.get(id=package.dropoff_area.id)
+            invoice = Invoice.objects.get(package_id=package.id)
+            latest_status = PackageStatus.objects.filter(package_id=package.id).order_by("-created_at").first()
+            data = {
+                "pickup_area": pickup_surbub.name,
+                "pickup_address": package.pickup_address,
+                "dropoff_area": dropoff_surbub.name,
+                "dropoff_address": package.dropoff_address if package.dropoff_address else None,
+                "amount": float(invoice.amount),
+                "is_sender_initiated": package.is_sender_initiated,
+                "assigned_at": package.assigned_at,
+                "delivered_at": package.delivered_at,
+                "latest_status": latest_status.status if latest_status else None,
+                "added_at": package.added_at,
+                "created_at": package.created_at,
+            }
+            orders_data.append(data)
+            if invoice.payment_method == "Cash" and package.delivered_at:
+                total_sales += float(invoice.amount)
+
+        return Response(
+            {
+                "total_orders": len(orders_data),
+                "cash_collected": total_sales,
+                "orders": orders_data,
+            },
+            status=status.HTTP_200_OK,
+        )

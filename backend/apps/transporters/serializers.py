@@ -39,3 +39,7 @@ class DailySalesResponseSerializer(serializers.Serializer):
 
 class CancelPackageResponseSerializer(serializers.Serializer):
     status = serializers.CharField()
+class OrderSummaryResponseSerializer(serializers.Serializer):
+    total_orders = serializers.IntegerField()
+    cash_collected = serializers.DecimalField(max_digits=10, decimal_places=2)
+    orders = serializers.ListField(child=serializers.DictField())

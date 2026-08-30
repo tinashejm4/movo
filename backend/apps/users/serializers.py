@@ -77,3 +77,11 @@ class SuburbSerializer(serializers.Serializer):
     name = serializers.CharField()
     city = serializers.PrimaryKeyRelatedField(queryset=City.objects.all())
     city_name = serializers.CharField(source='city.name', read_only=True)
+
+class DriverProfileResponseSerializer(serializers.Serializer):
+    first_name = serializers.CharField(allow_blank=True)
+    last_name = serializers.CharField(allow_blank=True)
+    username = serializers.CharField(allow_blank=True, required=False)
+    phone_number = serializers.CharField(allow_blank=True, required=False)
+    profile_image = serializers.CharField(allow_blank=True, required=False)
+    joined_on = serializers.DateTimeField()
