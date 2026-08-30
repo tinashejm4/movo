@@ -20,9 +20,9 @@ if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ] && [ "$D
 fi
 
 # Start Django's development server.
-# echo "Starting Django runserver on port ${PORT:-8000}..."
-# exec python manage.py runserver 0.0.0.0:${PORT:-8000}
+echo "Starting Django runserver on port ${PORT:-8000}..."
+exec python manage.py runserver 0.0.0.0:${PORT:-8000}
 
 # Start Daphne server for production.
-echo "Starting Daphne on port ${PORT:-8000}..."
-exec daphne -b 0.0.0.0 -p ${PORT:-8000} Movo.asgi:application
+# echo "Starting Daphne on port ${PORT:-8000}..."
+# exec daphne -b 0.0.0.0 -p ${PORT:-8000} Movo.asgi:application

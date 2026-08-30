@@ -315,6 +315,9 @@ STATIC_DIRS = [
     "staticfiles/rest_framework",
 ]
 
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 TXTCONSOLE_SEND_OTP = os.environ.get("TXTCONSOLE_SEND_OTP", "0") == "1"
 TXTCONSOLE_BASE_URL = os.environ.get("TXTCONSOLE_BASE_URL", "https://api.txtconsole.com/v1")
 TXTCONSOLE_SMS_URL = os.environ.get("TXTCONSOLE_SMS_URL")
