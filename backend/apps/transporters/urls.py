@@ -4,7 +4,9 @@ from .views import TransporterView, test_assign_pending_packages
 
 pickup_package = TransporterView.as_view({"post": "pickup_package"})
 dropoff_package = TransporterView.as_view({"post": "dropoff_package"})
-activate_deactivate = TransporterView.as_view({"post": "activate_deactivate"})
+activate_deactivate = TransporterView.as_view(
+    {"get": "get_daily_session", "patch": "activate_deactivate"}
+)
 cancel_package = TransporterView.as_view({"post": "cancel_package"})
 get_sales = TransporterView.as_view({"get": "daily_sales"})
 get_orders = TransporterView.as_view({"get": "order_summary"})

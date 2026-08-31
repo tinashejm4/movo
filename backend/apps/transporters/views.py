@@ -45,6 +45,23 @@ class TransporterView(ViewSet):
 
     @extend_schema(
         tags=["Biker Stuff"],
+        responses={
+            200: ActivateDeactivateResponseSerializer,
+        },
+    )
+    def get_daily_session(self, request):
+        session = BikerDailySession.objects.filter(
+            biker__user=request.user,
+            date=timezone.now().date(),
+        ).first()
+
+        return Response(
+            {"is_biker_activated": bool(session and session.is_active)},
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        tags=["Biker Stuff"],
         request=ActivateDeactivateRequestSerializer,
         responses={
             200: ActivateDeactivateResponseSerializer,

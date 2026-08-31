@@ -699,7 +699,7 @@ class DriverLoginView(APIView):
         )
 
 class DriverProfileView(APIView):
-    authentication_classes = []
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         tags=["Biker Stuff"],
