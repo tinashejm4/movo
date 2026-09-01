@@ -7,7 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Contact, Customer, OTP
+from .models import Biker, Contact, Customer, OTP, ProfileImage
 
 
 class CustomerOtpAuthTests(APITestCase):
@@ -109,3 +109,40 @@ class LogoutTests(APITestCase):
 			format="json",
 		)
 		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class DriverProfileTests(APITestCase):
+	def setUp(self):
+		self.user = User.objects.create_user(
+			username="0771234567",
+			password="Pass@123",
+			first_name="Test",
+			last_name="Driver",
+		)
+		self.biker = Biker.objects.create(user=self.user)
+		Contact.objects.create(user=self.user, phone_number="771234567")
+		ProfileImage.objects.create(user=self.user)
+
+	def test_profile_requires_authentication(self):
+		response = self.client.get(reverse("driver_profile"))
+
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_profile_returns_authenticated_driver(self):
+		refresh = RefreshToken.for_user(self.user)
+		self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+		response = self.client.get(reverse("driver_profile"))
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(
+			response.data,
+			{
+				"first_name": "Test",
+				"last_name": "Driver",
+				"username": "0771234567",
+				"phone_number": "0771234567",
+				"profile_image": "/media/profile_pics/profile_default.png",
+				"joined_on": self.biker.date_joined,
+			},
+		)

@@ -4,18 +4,23 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from decimal import Decimal
 from django.db import transaction
+from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from apps.intracity.models import Package, PackageStatus, Invoice
-from apps.users.models import Suburb
 from apps.intracity.services.package_assignment import assign_pending_packages
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from .models import BikerDailySession
+from .services import free_drivers_and_close_packages
 
 
 from .serializers import (
+    DateRangeQuerySerializer,
+    DriverPackageStatus,
+    DriverPaymentMethod,
     PickupPackageRequestSerializer,
     PickupPackageResponseSerializer,
     DropoffPackageRequestSerializer,
@@ -26,11 +31,19 @@ from .serializers import (
     CancelPackageRequestSerializer,
     CancelPackageResponseSerializer,
     DailySalesResponseSerializer,
-    OrderSummaryResponseSerializer
+    OrderSummaryResponseSerializer,
 )
 import logging
 
 logger = logging.getLogger(__name__)
+
+DRIVER_PACKAGE_STATUS_BY_VALUE = {
+    "Pending": DriverPackageStatus.PENDING.value,
+    "Assigned": DriverPackageStatus.ASSIGNED.value,
+    "In Transit": DriverPackageStatus.IN_TRANSIT.value,
+    "Delivered": DriverPackageStatus.DELIVERED.value,
+    "Cancelled": DriverPackageStatus.CANCELLED.value,
+}
 
 
 @api_view(["POST"])
@@ -40,8 +53,48 @@ def test_assign_pending_packages(request):
     return Response(assign_pending_packages(), status=status.HTTP_200_OK)
 
 
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def test_free_drivers(request):
+    """Test-only endpoint that closes assigned packages and frees bikers."""
+    return Response(
+        free_drivers_and_close_packages(),
+        status=status.HTTP_200_OK,
+    )
+
+
 class TransporterView(ViewSet):
     permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def get_date_range(request):
+        serializer = DateRangeQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        today = timezone.localdate()
+        start_date = serializer.validated_data.get("start_date")
+        end_date = serializer.validated_data.get("end_date")
+        if start_date is None and end_date is None:
+            return today, today
+        start_date = start_date or end_date
+        end_date = end_date or start_date
+        return start_date, end_date
+
+    @extend_schema(
+        tags=["Biker Stuff"],
+        responses={
+            200: ActivateDeactivateResponseSerializer,
+        },
+    )
+    def get_daily_session(self, request):
+        session = BikerDailySession.objects.filter(
+            biker__user=request.user,
+            date=timezone.now().date(),
+        ).first()
+
+        return Response(
+            {"is_biker_activated": bool(session and session.is_active)},
+            status=status.HTTP_200_OK,
+        )
 
     @extend_schema(
         tags=["Biker Stuff"],
@@ -323,7 +376,7 @@ class TransporterView(ViewSet):
         )
 
     @staticmethod
-    def record_cash_sale(self, package, invoice):
+    def record_cash_sale(package, invoice):
         if not invoice:
             return None
 
@@ -346,11 +399,20 @@ class TransporterView(ViewSet):
 
         invoice.is_paid = True
         invoice.paid_at = timezone.now()
-        invoice.save(update_fields=["is_paid", "paid_at"])
+        invoice.save(
+            update_fields=[
+                "payment_method",
+                "exchange_rate",
+                "is_pay_forward",
+                "is_paid",
+                "paid_at",
+            ]
+        )
         return None
 
     @extend_schema(
         tags=["Biker Stuff"],
+        parameters=[DateRangeQuerySerializer],
         responses={
             200: DailySalesResponseSerializer,
             400: OpenApiResponse(
@@ -366,20 +428,30 @@ class TransporterView(ViewSet):
 
     @transaction.atomic
     def daily_sales(self, request):
+        start_date, end_date = self.get_date_range(request)
         account = Account.objects.filter(owner=request.user).first()
 
-        sales = IntracitySale.objects.filter(account=account, created_at__date=timezone.now().date())
+        sales = (
+            IntracitySale.objects.filter(
+                account=account,
+                added_at__range=(start_date, end_date),
+                invoice__payment_method="Cash",
+            )
+            .select_related("invoice")
+            .order_by("id")
+        )
         
         sales_data = []
-        total_sales = 0
+        total_sales = Decimal("0.00")
         for sale in sales:
             data = {
                 "invoice_id": sale.invoice.id,
-                "amount": float(sale.amount),
-                "created_at": sale.created_at,
+                "amount": Decimal(str(sale.amount)),
+                "payment_method": sale.invoice.payment_method,
+                "collected_at": sale.added_at,
             }
             sales_data.append(data)
-            total_sales += float(sale.amount)
+            total_sales += Decimal(str(sale.amount))
 
         return Response(
             {"total_sales": total_sales,
@@ -414,7 +486,7 @@ class TransporterView(ViewSet):
                 float(sale.amount)
                 for sale in IntracitySale.objects.filter(
                     account=biker_account,
-                    created_at__date=timezone.now().date(),
+                    added_at=timezone.localdate(),
                     invoice__payment_method="Cash",
                 )
             ),
@@ -429,6 +501,7 @@ class TransporterView(ViewSet):
 
     @extend_schema(
         tags=["Biker Stuff"],
+        parameters=[DateRangeQuerySerializer],
         responses={
             200: OrderSummaryResponseSerializer,
             400: OpenApiResponse(
@@ -442,37 +515,84 @@ class TransporterView(ViewSet):
         },
     )
     def order_summary(self, request):
+        start_date, end_date = self.get_date_range(request)
+        package_statuses = PackageStatus.objects.filter(package=OuterRef("pk"))
+        latest_status = (
+            package_statuses.order_by("-updated_at", "-pk")
+            .values("status")[:1]
+        )
+        first_collection = (
+            package_statuses.filter(status="In Transit")
+            .order_by("updated_at", "pk")
+            .values("updated_at")[:1]
+        )
+        packages = list(
+            Package.objects.filter(
+                biker__user=request.user,
+                added_at__date__range=(start_date, end_date),
+            )
+            .select_related(
+                "pickup_area",
+                "dropoff_area",
+                "invoice",
+                "sender__user",
+                "receiver__user",
+            )
+            .annotate(
+                current_status=Subquery(latest_status),
+                collected_at=Subquery(first_collection),
+            )
+        )
 
-        packages = Package.objects.filter(driver=request.user, created_at__date=timezone.now().date())
-        
+        # cash_collected is based on cash collection records, not inferred from
+        # an order merely being delivered with Cash selected as its method.
+        cash_sales = {
+            sale.invoice_id: Decimal(str(sale.amount))
+            for sale in IntracitySale.objects.filter(
+                account__owner=request.user,
+                invoice__package__in=packages,
+                invoice__payment_method="Cash",
+                added_at__range=(start_date, end_date),
+            )
+        }
+
         orders_data = []
-        total_sales = 0
+        cash_collected = Decimal("0.00")
         for package in packages:
-            pickup_surbub = Suburb.objects.get(id=package.pickup_area.id)
-            dropoff_surbub = Suburb.objects.get(id=package.dropoff_area.id)
-            invoice = Invoice.objects.get(package_id=package.id)
-            latest_status = PackageStatus.objects.filter(package_id=package.id).order_by("-created_at").first()
+            invoice = package.invoice
+            order_cash_collected = cash_sales.get(invoice.id, Decimal("0.00"))
             data = {
-                "pickup_area": pickup_surbub.name,
+                "package_id": package.id,
+                "slug": package.slug,
+                "collected_from": package.sender.user.get_full_name().strip(),
+                "delivered_to": package.receiver.user.get_full_name().strip(),
+                "pickup_area": package.pickup_area.name if package.pickup_area else None,
                 "pickup_address": package.pickup_address,
-                "dropoff_area": dropoff_surbub.name,
+                "dropoff_area": package.dropoff_area.name if package.dropoff_area else None,
                 "dropoff_address": package.dropoff_address if package.dropoff_address else None,
-                "amount": float(invoice.amount),
+                "amount": invoice.amount,
+                "payment_method": (
+                    DriverPaymentMethod.CASH.value
+                    if invoice.payment_method == "Cash"
+                    else DriverPaymentMethod.CARD.value
+                ),
+                "cash_collected": order_cash_collected,
                 "is_sender_initiated": package.is_sender_initiated,
                 "assigned_at": package.assigned_at,
+                "collected_at": package.collected_at,
                 "delivered_at": package.delivered_at,
-                "latest_status": latest_status.status if latest_status else None,
+                "latest_status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(
+                    package.current_status
+                ),
                 "added_at": package.added_at,
-                "created_at": package.created_at,
             }
             orders_data.append(data)
-            if invoice.payment_method == "Cash" and package.delivered_at:
-                total_sales += float(invoice.amount)
+            cash_collected += order_cash_collected
 
         return Response(
             {
                 "total_orders": len(orders_data),
-                "cash_collected": total_sales,
+                "cash_collected": cash_collected,
                 "orders": orders_data,
             },
             status=status.HTTP_200_OK,
