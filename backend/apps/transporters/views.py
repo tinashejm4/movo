@@ -531,7 +531,13 @@ class TransporterView(ViewSet):
                 biker__user=request.user,
                 added_at__date__range=(start_date, end_date),
             )
-            .select_related("pickup_area", "dropoff_area", "invoice")
+            .select_related(
+                "pickup_area",
+                "dropoff_area",
+                "invoice",
+                "sender__user",
+                "receiver__user",
+            )
             .annotate(
                 current_status=Subquery(latest_status),
                 collected_at=Subquery(first_collection),
@@ -558,6 +564,8 @@ class TransporterView(ViewSet):
             data = {
                 "package_id": package.id,
                 "slug": package.slug,
+                "collected_from": package.sender.user.get_full_name().strip(),
+                "delivered_to": package.receiver.user.get_full_name().strip(),
                 "pickup_area": package.pickup_area.name if package.pickup_area else None,
                 "pickup_address": package.pickup_address,
                 "dropoff_area": package.dropoff_area.name if package.dropoff_area else None,

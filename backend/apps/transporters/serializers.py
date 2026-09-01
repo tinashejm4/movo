@@ -83,6 +83,8 @@ class DriverPackageStatus(str, Enum):
 class OrderSummaryItemSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     slug = serializers.SlugField()
+    collected_from = serializers.CharField(allow_blank=True)
+    delivered_to = serializers.CharField(allow_blank=True)
     pickup_area = serializers.CharField(allow_null=True)
     pickup_address = serializers.CharField()
     dropoff_area = serializers.CharField(allow_null=True)

@@ -239,8 +239,16 @@ class BikerSalesAndOrdersEndpointTests(APITestCase):
 			owner=self.biker_user,
 			currency="USD",
 		)
-		sender_user = User.objects.create_user(username="sales-sender")
-		receiver_user = User.objects.create_user(username="sales-receiver")
+		sender_user = User.objects.create_user(
+			username="sales-sender",
+			first_name="Tariro",
+			last_name="Moyo",
+		)
+		receiver_user = User.objects.create_user(
+			username="sales-receiver",
+			first_name="Nyasha",
+			last_name="Kamba",
+		)
 		self.sender = Customer.objects.create(user=sender_user)
 		self.receiver = Customer.objects.create(user=receiver_user)
 		self.city = City.objects.create(name="Harare")
@@ -317,6 +325,8 @@ class BikerSalesAndOrdersEndpointTests(APITestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		order = response.data["orders"][0]
 		self.assertEqual(order["slug"], package.slug)
+		self.assertEqual(order["collected_from"], "Tariro Moyo")
+		self.assertEqual(order["delivered_to"], "Nyasha Kamba")
 		self.assertEqual(order["collected_at"], first_collected_at)
 
 	def test_order_summary_returns_null_when_package_was_not_collected(self):
