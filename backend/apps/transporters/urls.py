@@ -1,6 +1,10 @@
 from django.urls import path
 
-from .views import TransporterView, test_assign_pending_packages
+from .views import (
+    TransporterView,
+    test_assign_pending_packages,
+    test_free_drivers,
+)
 
 pickup_package = TransporterView.as_view({"post": "pickup_package"})
 dropoff_package = TransporterView.as_view({"post": "dropoff_package"})
@@ -12,6 +16,11 @@ get_sales = TransporterView.as_view({"get": "daily_sales"})
 get_orders = TransporterView.as_view({"get": "order_summary"})
 
 urlpatterns = [
+    path(
+        "test-free-drivers/",
+        test_free_drivers,
+        name="test_free_drivers",
+    ),
     path(
         "test-assign-pending-packages/",
         test_assign_pending_packages,
