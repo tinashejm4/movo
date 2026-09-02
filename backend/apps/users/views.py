@@ -30,7 +30,7 @@ from apps.users.serializers import (
     TokenRefreshResponseSerializer,
     LogoutRequestSerializer,
     LogoutResponseSerializer,
-    DriverProfileResponseSerializer
+    DriverProfileResponseSerializer,
 )
 from .models import OTP, Biker, City, Contact, Customer, ProfileImage, Staff, Suburb
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -377,6 +377,7 @@ class OTPCreateView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+
 def request_otp(username):
 
     if not username:
@@ -488,7 +489,9 @@ class CustomerRegisterLoginView(APIView):
                 {"error": "phone_number and otp_code are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        logger.warning("Otp code received for username: %s, otp_code: %s", username, otp_code)
+        logger.warning(
+            "Otp code received for username: %s, otp_code: %s", username, otp_code
+        )
 
         try:
             otp = OTP.objects.get(username=username, otp_code=otp_code)
@@ -604,17 +607,13 @@ class CustomerProfileView(viewsets.ModelViewSet):
             )
 
         user = customer.user
-        missing_fields = [
-            field for field in ["first_name", "last_name"] if not getattr(user, field)
-        ]
-        if not missing_fields:
-            return Response(
-                {"error": "Profile name is already complete"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
+        allowed_fields = ["first_name", "last_name"]
         updates = {}
-        for field in missing_fields:
+
+        for field in allowed_fields:
+            if field not in request.data:
+                continue
+
             value = request.data.get(field)
             if value is None or not str(value).strip():
                 return Response(
@@ -622,6 +621,12 @@ class CustomerProfileView(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             updates[field] = str(value).strip().capitalize()
+
+        if not updates:
+            return Response(
+                {"error": "No name fields provided"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         for field, value in updates.items():
             setattr(user, field, value)
@@ -668,7 +673,7 @@ class DriverLoginView(APIView):
             )
 
         username = normalize_zimbabwean_number(username.strip())
-        
+
         user = authenticate(username=username, password=password)
         if not user:
             return Response(
@@ -689,7 +694,9 @@ class DriverLoginView(APIView):
 
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
-        logger.makeRecord("info", f"{user.username} logged in", None, None, None, None, None)
+        logger.makeRecord(
+            "info", f"{user.username} logged in", None, None, None, None, None
+        )
         return Response(
             {
                 "access": str(refresh.access_token),
@@ -697,6 +704,7 @@ class DriverLoginView(APIView):
                 "username": user.username,
             }
         )
+
 
 class DriverProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -709,7 +717,10 @@ class DriverProfileView(APIView):
                 ErrorResponseSerializer, description="Invalid credentials"
             ),
             403: OpenApiResponse(ErrorResponseSerializer, description="Inactive user"),
-            404: OpenApiResponse(ErrorResponseSerializer, description="Biker Profile/Contact/Profile image not found"),
+            404: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Biker Profile/Contact/Profile image not found",
+            ),
         },
     )
     def get(self, request):

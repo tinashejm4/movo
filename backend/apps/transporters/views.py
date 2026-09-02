@@ -13,6 +13,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 from apps.intracity.models import Package, PackageStatus, Invoice
 from apps.intracity.services.package_assignment import assign_pending_packages
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
+from apps.users.models import Contact, ProfileImage
 from .models import BikerDailySession
 from .services import free_drivers_and_close_packages
 
@@ -111,14 +112,15 @@ class TransporterView(ViewSet):
             ),
         },
     )
-
     @transaction.atomic
     def activate_deactivate(self, request):
         serializer = ActivateDeactivateRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         is_biker_activated = serializer.validated_data.get("is_biker_activated")
         # Update the biker's daily session status
-        session = BikerDailySession.objects.filter(biker__user=request.user, date=timezone.now().date()).first()
+        session = BikerDailySession.objects.filter(
+            biker__user=request.user, date=timezone.now().date()
+        ).first()
         if session:
             session.is_active = is_biker_activated
             session.save()
@@ -129,7 +131,10 @@ class TransporterView(ViewSet):
                 start_time=timezone.now(),
                 is_active=is_biker_activated,
             )
-        logger.log(logging.INFO, f"Biker {'activated' if is_biker_activated else 'deactivated'} on {timezone.now().date()}")
+        logger.log(
+            logging.INFO,
+            f"Biker {'activated' if is_biker_activated else 'deactivated'} on {timezone.now().date()}",
+        )
         return Response(
             {"is_biker_activated": is_biker_activated},
             status=status.HTTP_200_OK,
@@ -150,7 +155,6 @@ class TransporterView(ViewSet):
             ),
         },
     )
-
     @transaction.atomic
     def cancel_package(self, request):
         serializer = CancelPackageRequestSerializer(data=request.data)
@@ -187,15 +191,17 @@ class TransporterView(ViewSet):
             package=package,
             status="Cancelled",
             comments=reason,
-            updated_at=timezone.now()
+            updated_at=timezone.now(),
         )
-        logger.log(logging.INFO, f"Package {package_id} cancelled by biker {request.user.id} for reason: {reason}. Date: {timezone.now()}")
+        logger.log(
+            logging.INFO,
+            f"Package {package_id} cancelled by biker {request.user.id} for reason: {reason}. Date: {timezone.now()}",
+        )
 
         return Response(
             {"status": "Package cancelled successfully", "reason": reason},
             status=status.HTTP_200_OK,
         )
-
 
     @extend_schema(
         tags=["Biker Stuff"],
@@ -212,7 +218,6 @@ class TransporterView(ViewSet):
             ),
         },
     )
-
     @transaction.atomic
     def pickup_package(self, request):
         serializer = PickupPackageRequestSerializer(data=request.data)
@@ -227,9 +232,7 @@ class TransporterView(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        package = get_object_or_404(
-            Package, id=package_id
-        )
+        package = get_object_or_404(Package, id=package_id)
 
         if not package.biker:
             return Response(
@@ -250,7 +253,10 @@ class TransporterView(ViewSet):
         )
         if latest_status and latest_status.status != "Pending":
             return Response(
-                {"error": "Package should be Pending. Current status: " + latest_status.status.lower()},
+                {
+                    "error": "Package should be Pending. Current status: "
+                    + latest_status.status.lower()
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -264,7 +270,9 @@ class TransporterView(ViewSet):
             invoice = Invoice.objects.filter(package=package).first()
             if not invoice:
                 return Response(
-                    {"error": "Package cannot be collected because the invoice is missing"},
+                    {
+                        "error": "Package cannot be collected because the invoice is missing"
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if not invoice.is_paid:
@@ -299,7 +307,6 @@ class TransporterView(ViewSet):
             ),
         },
     )
-
     @transaction.atomic
     def dropoff_package(self, request):
         serializer = DropoffPackageRequestSerializer(data=request.data)
@@ -336,7 +343,10 @@ class TransporterView(ViewSet):
         )
         if not latest_status or latest_status.status != "In Transit":
             return Response(
-                {"error": "Package must be in transit before it can be delivered. Current status: " + (latest_status.status.lower() if latest_status else "none")},
+                {
+                    "error": "Package must be in transit before it can be delivered. Current status: "
+                    + (latest_status.status.lower() if latest_status else "none")
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -350,7 +360,9 @@ class TransporterView(ViewSet):
             invoice = Invoice.objects.filter(package=package).first()
             if not invoice:
                 return Response(
-                    {"error": "Package cannot be delivered because the invoice is missing"},
+                    {
+                        "error": "Package cannot be delivered because the invoice is missing"
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if not invoice.is_paid:
@@ -412,6 +424,76 @@ class TransporterView(ViewSet):
 
     @extend_schema(
         tags=["Biker Stuff"],
+        responses={
+            200: OpenApiResponse(
+                description="Current active biker assignment payload or null when no active assignment exists.",
+            ),
+        },
+    )
+    def current_assignment(self, request):
+        package_statuses = PackageStatus.objects.filter(package=OuterRef("pk"))
+        latest_status = package_statuses.order_by("-updated_at", "-pk").values(
+            "status"
+        )[:1]
+
+        package = (
+            Package.objects.filter(biker__user=request.user)
+            .select_related(
+                "biker__user",
+                "sender__user",
+                "receiver__user",
+                "pickup_area",
+                "dropoff_area",
+            )
+            .annotate(current_status=Subquery(latest_status))
+            .filter(current_status__in=["Pending", "Assigned", "In Transit"])
+            .order_by("-assigned_at", "-added_at")
+            .first()
+        )
+
+        if not package:
+            return Response({"assignment": None}, status=status.HTTP_200_OK)
+
+        contact = Contact.objects.filter(user=package.biker.user).first()
+        profile_picture = ProfileImage.objects.filter(user=package.biker.user).first()
+
+        payload = {
+            "package_id": package.id,
+            "slug": package.slug,
+            "biker_id": package.biker.id,
+            "biker_name": (
+                f"{package.biker.user.first_name} {package.biker.user.last_name}".strip()
+            ),
+            "biker_phone_number": contact.phone_number if contact else None,
+            "biker_profile_pic": (
+                profile_picture.profile_image.url
+                if profile_picture and profile_picture.profile_image
+                else None
+            ),
+            "package_pickup_area": (
+                package.pickup_area.name if package.pickup_area else None
+            ),
+            "package_pickup_address": package.pickup_address,
+            "sender_name": (
+                f"{package.sender.user.first_name} {package.sender.user.last_name}".strip()
+            ),
+            "sender_phone": f"+263{package.sender.user.username}",
+            "receiver_name": (
+                f"{package.receiver.user.first_name} {package.receiver.user.last_name}".strip()
+            ),
+            "receiver_phone": f"+263{package.receiver.user.username}",
+            "comments": package.comments,
+            "assigned_at": (
+                package.assigned_at.isoformat() if package.assigned_at else None
+            ),
+            "added_at": package.added_at.isoformat() if package.added_at else None,
+            "current_status": package.current_status,
+        }
+
+        return Response({"assignment": payload}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Biker Stuff"],
         parameters=[DateRangeQuerySerializer],
         responses={
             200: DailySalesResponseSerializer,
@@ -425,7 +507,6 @@ class TransporterView(ViewSet):
             ),
         },
     )
-
     @transaction.atomic
     def daily_sales(self, request):
         start_date, end_date = self.get_date_range(request)
@@ -440,7 +521,7 @@ class TransporterView(ViewSet):
             .select_related("invoice")
             .order_by("id")
         )
-        
+
         sales_data = []
         total_sales = Decimal("0.00")
         for sale in sales:
@@ -454,30 +535,31 @@ class TransporterView(ViewSet):
             total_sales += Decimal(str(sale.amount))
 
         return Response(
-            {"total_sales": total_sales,
-             "sales": sales_data,
+            {
+                "total_sales": total_sales,
+                "sales": sales_data,
             },
             status=status.HTTP_200_OK,
         )
 
     @extend_schema(
-    tags=["Biker Stuff"],
-    responses={
-        200: DailySalesResponseSerializer,
-        400: OpenApiResponse(
-            ErrorResponseSerializer,
-            description="Incorrect request parameters",
-        ),
-        403: OpenApiResponse(
-            ErrorResponseSerializer,
-            description="User is not assigned to this package",
-        ),
-    },
+        tags=["Biker Stuff"],
+        responses={
+            200: DailySalesResponseSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Incorrect request parameters",
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="User is not assigned to this package",
+            ),
+        },
     )
     @transaction.atomic
     def end_day(self, request):
         biker_account = Account.objects.filter(owner=request.user).first()
-        cash_account = Account.objects.get(name = "Cash", currency="USD")
+        cash_account = Account.objects.get(name="Cash", currency="USD")
 
         FundsTransfer.objects.create(
             from_account=biker_account,
@@ -517,10 +599,9 @@ class TransporterView(ViewSet):
     def order_summary(self, request):
         start_date, end_date = self.get_date_range(request)
         package_statuses = PackageStatus.objects.filter(package=OuterRef("pk"))
-        latest_status = (
-            package_statuses.order_by("-updated_at", "-pk")
-            .values("status")[:1]
-        )
+        latest_status = package_statuses.order_by("-updated_at", "-pk").values(
+            "status"
+        )[:1]
         first_collection = (
             package_statuses.filter(status="In Transit")
             .order_by("updated_at", "pk")
@@ -566,10 +647,16 @@ class TransporterView(ViewSet):
                 "slug": package.slug,
                 "collected_from": package.sender.user.get_full_name().strip(),
                 "delivered_to": package.receiver.user.get_full_name().strip(),
-                "pickup_area": package.pickup_area.name if package.pickup_area else None,
+                "pickup_area": (
+                    package.pickup_area.name if package.pickup_area else None
+                ),
                 "pickup_address": package.pickup_address,
-                "dropoff_area": package.dropoff_area.name if package.dropoff_area else None,
-                "dropoff_address": package.dropoff_address if package.dropoff_address else None,
+                "dropoff_area": (
+                    package.dropoff_area.name if package.dropoff_area else None
+                ),
+                "dropoff_address": (
+                    package.dropoff_address if package.dropoff_address else None
+                ),
                 "amount": invoice.amount,
                 "payment_method": (
                     DriverPaymentMethod.CASH.value
