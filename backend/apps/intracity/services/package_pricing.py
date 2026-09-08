@@ -19,17 +19,22 @@ def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery
     try:
         from_suburb = Suburb.objects.get(id=from_suburb_id)
         to_suburb = Suburb.objects.get(id=to_suburb_id)
+        cbd = Suburb.objects.get(city_id=city_id, name = "CBD")
     except Suburb.DoesNotExist as exc:
         raise PackagePricingNotFound("suburb not found") from exc
 
+    collection_distance = 0
+    if cbd not in [from_suburb, to_suburb, cbd]:
+        collection_distance = from_suburb.distance_to(cbd)
+    
     try:
-        coord_distance = from_suburb.distance_to(to_suburb)
+        transit_distance = from_suburb.distance_to(to_suburb)
     except ValueError as exc:
         raise PackagePricingError(str(exc)) from exc
 
-    if coord_distance is None:
+    if transit_distance is None:
         raise PackagePricingError("distance_km is required")
-    if coord_distance < 0:
+    if transit_distance < 0:
         raise PackagePricingError("distance_km must be zero or positive")
 
     if isinstance(is_fast_delivery, str):
@@ -63,8 +68,9 @@ def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery
         .annotate(status=Subquery(latest_status))
         .filter(status="Pending").count()
     )
+
     amount = float(price.base_price) + (
-        float(price.rate_per_km) * coord_distance * (1 + pending_packages_count / 10)
+        float(price.rate_per_km) * (transit_distance + collection_distance/2) * (1 + pending_packages_count / 10)
     )
     if fast_delivery:
 
@@ -83,7 +89,7 @@ def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery
 
     return {
         "city_id": city.id,
-        "distance_km": coord_distance,
+        "distance_km": transit_distance,
         "is_fast_delivery": fast_delivery,
         "amount": amount,
     }
