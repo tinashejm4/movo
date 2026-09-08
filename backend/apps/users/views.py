@@ -67,7 +67,7 @@ class CityViewSet(viewsets.ModelViewSet):
 
 
 class SuburbViewSet(viewsets.ModelViewSet):
-    queryset = Suburb.objects.all()
+    queryset = Suburb.objects.filter(is_active=True)
     serializer_class = SuburbSerializer
     permission_classes = [AllowAny]
 
@@ -479,10 +479,6 @@ class CustomerRegisterLoginView(APIView):
         otp_code = data.get("otp_code")
         is_profile_complete = False
         username = normalize_zimbabwean_number(username)
-
-        print(
-            f"Received request with phone_number: {username} and otp_code: {otp_code}"
-        )  # Debugging line
 
         if not username or not otp_code:
             return Response(

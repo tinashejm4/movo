@@ -614,7 +614,7 @@ class PackageViewSet(ViewSet):
             )
         normalized_query = query.lower()
 
-        suburbs_qs = Suburb.objects.filter(name__icontains=query)
+        suburbs_qs = Suburb.objects.filter(name__icontains=query, is_active=True)
         if city_id:
             suburbs_qs = suburbs_qs.filter(city__id=city_id)
 

@@ -89,6 +89,7 @@ class OTP(models.Model):
 class Suburb(models.Model):
     city = models.ForeignKey('City', on_delete=models.CASCADE, related_name='suburbs')
     name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=False)
     x_pos = models.DecimalField(max_digits=10, decimal_places=3)
     y_pos = models.DecimalField(max_digits=10, decimal_places=3)
     x_coord = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
