@@ -47,7 +47,7 @@ class PackageListPagination(PageNumberPagination):
     max_page_size = 10
 
 class PackageViewSet(ViewSet):
-    ACTIVE_PACKAGE_STATUSES = {"Pending", "In Transit"}
+    ACTIVE_PACKAGE_STATUSES = {"Pending", "Assigned", "In Transit"}
 
     def get_permissions(self):
         if self.action in {
@@ -531,6 +531,19 @@ class PackageViewSet(ViewSet):
 
         is_fast_delivery_raw = data.get("is_fast_delivery", False)
         city_id = data.get("city_id")
+
+        logger.warning(
+            f"Calculating package price with from_suburb_id={from_suburb_id}, "
+            f"to_suburb_id={to_suburb_id}, city_id={city_id}, "
+            f"is_fast_delivery={is_fast_delivery_raw}"
+        )
+
+        price_result = calculate_package_price(
+            from_suburb_id=from_suburb_id,
+            to_suburb_id=to_suburb_id,
+            city_id=city_id,
+            is_fast_delivery=is_fast_delivery_raw,
+        )
 
         try:
             price_result = calculate_package_price(

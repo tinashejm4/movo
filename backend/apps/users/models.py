@@ -90,8 +90,6 @@ class Suburb(models.Model):
     city = models.ForeignKey('City', on_delete=models.CASCADE, related_name='suburbs')
     name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=False)
-    x_pos = models.DecimalField(max_digits=10, decimal_places=3)
-    y_pos = models.DecimalField(max_digits=10, decimal_places=3)
     x_coord = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     y_coord = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
 
@@ -102,20 +100,20 @@ class Suburb(models.Model):
         ordering = ['city_id', 'name']
 
     def __str__(self):
-        return f'{self.name} ({self.city.name}) @ ({self.x_pos}, {self.y_pos})'
+        return f'{self.name} ({self.city.name}) @ ({self.x_coord}, {self.y_coord}) is {"active" if self.is_active else "inactive"}'
 
     def distance_to(self, other):
-        
+        coord_dist_to_km = lambda dist: dist * 111  # Approximate conversion from coordinate distance to kilometers``
         if not isinstance(other, Suburb):
             raise TypeError('distance_to expects a Suburb instance')
         if self.city_id != other.city_id:
             raise ValueError('Cannot calculate distance between suburbs in different cities')
 
-        x1 = float(self.x_pos)
-        y1 = float(self.y_pos)
-        x2 = float(other.x_pos)
-        y2 = float(other.y_pos)
-        return math.dist((x1, y1), (x2, y2))
+        x1 = float(self.x_coord)
+        y1 = float(self.y_coord)
+        x2 = float(other.x_coord)
+        y2 = float(other.y_coord)
+        return coord_dist_to_km(math.dist((x1, y1), (x2, y2)))
 
 class City(models.Model):
     name = models.CharField(max_length=100)
