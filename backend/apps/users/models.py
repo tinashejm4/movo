@@ -113,7 +113,7 @@ class Suburb(models.Model):
         y1 = float(self.y_coord)
         x2 = float(other.x_coord)
         y2 = float(other.y_coord)
-        return coord_dist_to_km(math.dist((x1, y1), (x2, y2)))
+        return coord_dist_to_km(math.dist((x1, y1), (x2, y2))) *1.3
 
 class City(models.Model):
     name = models.CharField(max_length=100)

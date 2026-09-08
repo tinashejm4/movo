@@ -1,5 +1,6 @@
 from decimal import Decimal
 import math
+from venv import logger
 from django.utils import timezone
 
 from apps.users.models import City, Suburb
@@ -24,7 +25,7 @@ def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery
         raise PackagePricingNotFound("suburb not found") from exc
 
     collection_distance = 0
-    if cbd not in [from_suburb, to_suburb, cbd]:
+    if cbd not in [from_suburb, to_suburb]:
         collection_distance = from_suburb.distance_to(cbd)
     
     try:
@@ -70,8 +71,9 @@ def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery
     )
 
     amount = float(price.base_price) + (
-        float(price.rate_per_km) * (transit_distance + collection_distance/2) * (1 + pending_packages_count / 10)
-    )
+        float(price.rate_per_km) * (transit_distance + collection_distance)
+    ) + (pending_packages_count / 10)
+
     if fast_delivery:
 
         pending_packages_fast_delivery_count = (
@@ -89,7 +91,7 @@ def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery
 
     return {
         "city_id": city.id,
-        "distance_km": transit_distance,
+        "distance_km": transit_distance+collection_distance,
         "is_fast_delivery": fast_delivery,
         "amount": amount,
     }
