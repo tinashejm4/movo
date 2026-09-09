@@ -15,6 +15,10 @@ class InvoiceDetailsResponseSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     invoice_id = serializers.IntegerField(allow_null=True)
     is_paid = serializers.BooleanField(allow_null=True)
+    payment_method = serializers.ChoiceField(
+        choices=["cash", "card"], allow_null=True
+    )
+    paid_at = serializers.DateTimeField(allow_null=True)
     is_pay_forward = serializers.BooleanField(allow_null=True)
     is_payer = serializers.BooleanField()
     can_pay = serializers.BooleanField()

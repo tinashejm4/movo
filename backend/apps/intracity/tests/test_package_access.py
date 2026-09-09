@@ -204,12 +204,33 @@ class PackagePaymentAccessTests(APITestCase):
 
     def test_paid_invoice_identifies_payer_but_cannot_be_paid(self):
         self.invoice.is_paid = True
-        self.invoice.save(update_fields=["is_paid"])
+        self.invoice.payment_method = "Cash"
+        self.invoice.paid_at = timezone.now()
+        self.invoice.save(update_fields=["is_paid", "payment_method", "paid_at"])
 
         response = self.get_invoice_details(self.sender_user)
 
         self.assertTrue(response.data["is_payer"])
         self.assertFalse(response.data["can_pay"])
+        self.assertEqual(response.data["payment_method"], "cash")
+        self.assertEqual(response.data["paid_at"], self.invoice.paid_at)
+
+    def test_unpaid_invoice_returns_null_payment_details(self):
+        response = self.get_invoice_details(self.sender_user)
+
+        self.assertFalse(response.data["is_paid"])
+        self.assertIsNone(response.data["payment_method"])
+        self.assertIsNone(response.data["paid_at"])
+
+    def test_non_cash_paid_invoice_is_returned_as_card(self):
+        self.invoice.is_paid = True
+        self.invoice.payment_method = "PaynowEcocash"
+        self.invoice.paid_at = timezone.now()
+        self.invoice.save(update_fields=["is_paid", "payment_method", "paid_at"])
+
+        response = self.get_invoice_details(self.sender_user)
+
+        self.assertEqual(response.data["payment_method"], "card")
 
     def test_cancelled_package_identifies_payer_but_cannot_be_paid(self):
         PackageStatus.objects.create(package=self.package, status="Cancelled")

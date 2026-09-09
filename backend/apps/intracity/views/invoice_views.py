@@ -97,11 +97,17 @@ class InvoiceViewSet(ViewSet):
                 invoice.paid_at = timezone.now()
                 invoice.save(update_fields=["is_paid", "paid_at"])
 
+        payment_method = None
+        if invoice and invoice.is_paid:
+            payment_method = "cash" if invoice.payment_method == "Cash" else "card"
+
         serializer = InvoiceDetailsResponseSerializer(
             {
                 "package_id": package.id,
                 "invoice_id": invoice.id if invoice else None,
                 "is_paid": invoice.is_paid if invoice else None,
+                "payment_method": payment_method,
+                "paid_at": invoice.paid_at if invoice and invoice.is_paid else None,
                 "is_pay_forward": invoice.is_pay_forward if invoice else None,
                 "is_payer": invoice_user_is_payer(invoice, request.user.id),
                 "can_pay": invoice_user_can_pay(invoice, request.user.id),
