@@ -582,7 +582,9 @@ class TransporterView(ViewSet):
             "invoice_id": invoice.id if invoice else None,
             "status_history": [
                 {
-                    "status": status_record.status,
+                    "status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(
+                        status_record.status
+                    ),
                     "comments": status_record.comments,
                     "updated_at": status_record.updated_at,
                 }

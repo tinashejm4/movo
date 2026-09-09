@@ -52,7 +52,7 @@ class InvoiceViewSet(ViewSet):
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
         package = Package.objects.select_related(
-            "sender__user", "receiver__user"
+            "sender__user", "receiver__user", "biker__user"
         ).filter(id=package_id).first()
         if not package:
             return Response(
@@ -61,6 +61,7 @@ class InvoiceViewSet(ViewSet):
         if request.user.id not in {
             package.sender.user_id,
             package.receiver.user_id,
+            package.biker.user_id if package.biker else None,
         }:
             return Response(
                 {

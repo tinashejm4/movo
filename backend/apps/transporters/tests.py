@@ -601,7 +601,7 @@ class TransporterPackageDetailEndpointTests(APITestCase):
         self.assertEqual(response.data["collected_at"], self.collected_status.updated_at)
         self.assertEqual(
             [item["status"] for item in response.data["status_history"]],
-            ["Assigned", "In Transit"],
+            ["assigned", "in_transit"],
         )
         self.assertNotIn("sender_code", response.data)
         self.assertNotIn("receiver_code", response.data)
