@@ -109,3 +109,40 @@ class OrderSummaryResponseSerializer(serializers.Serializer):
     total_orders = serializers.IntegerField()
     cash_collected = serializers.DecimalField(max_digits=10, decimal_places=2)
     orders = OrderSummaryItemSerializer(many=True)
+
+
+class PackageDetailQuerySerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=True)
+
+
+class PackageStatusDetailSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    comments = serializers.CharField(allow_null=True, allow_blank=True)
+    updated_at = serializers.DateTimeField()
+
+
+class TransporterPackageDetailSerializer(serializers.Serializer):
+    package_id = serializers.IntegerField()
+    slug = serializers.SlugField()
+    sender_name = serializers.CharField(allow_blank=True)
+    sender_phone = serializers.CharField(allow_null=True)
+    receiver_name = serializers.CharField(allow_blank=True)
+    receiver_phone = serializers.CharField(allow_null=True)
+    city = serializers.CharField()
+    pickup_area = serializers.CharField(allow_null=True)
+    pickup_address = serializers.CharField()
+    dropoff_area = serializers.CharField(allow_null=True)
+    dropoff_address = serializers.CharField()
+    comments = serializers.CharField(allow_null=True, allow_blank=True)
+    is_fast_delivery = serializers.BooleanField()
+    is_sender_initiated = serializers.BooleanField()
+    assigned_at = serializers.DateTimeField(allow_null=True)
+    collected_at = serializers.DateTimeField(allow_null=True)
+    delivered_at = serializers.DateTimeField(allow_null=True)
+    added_at = serializers.DateTimeField()
+    current_status = serializers.ChoiceField(
+        choices=[package_status.value for package_status in DriverPackageStatus],
+        allow_null=True,
+    )
+    invoice_id = serializers.IntegerField(allow_null=True)
+    status_history = PackageStatusDetailSerializer(many=True)

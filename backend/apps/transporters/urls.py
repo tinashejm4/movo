@@ -15,6 +15,7 @@ cancel_package = TransporterView.as_view({"post": "cancel_package"})
 get_sales = TransporterView.as_view({"get": "daily_sales"})
 get_orders = TransporterView.as_view({"get": "order_summary"})
 current_assignment = TransporterView.as_view({"get": "current_assignment"})
+package_detail = TransporterView.as_view({"get": "package_detail"})
 
 urlpatterns = [
     path(
@@ -34,4 +35,5 @@ urlpatterns = [
     path("get-sales/", get_sales, name="get_sales"),
     path("get-orders/", get_orders, name="get_orders"),
     path("current-assignment/", current_assignment, name="current_assignment"),
+    path("package/", package_detail, name="transporter_package_detail"),
 ]

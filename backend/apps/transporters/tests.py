@@ -275,6 +275,9 @@ class CurrentAssignmentEndpointTests(APITestCase):
         self.assertEqual(response.data["assignment"]["biker_id"], self.biker.id)
         self.assertEqual(response.data["assignment"]["sender_name"], "Sender One")
         self.assertEqual(response.data["assignment"]["receiver_name"], "Receiver One")
+        self.assertEqual(
+            response.data["assignment"]["package_dropoff_address"], "Dropoff Street"
+        )
 
     def test_get_returns_no_assignment_when_biker_has_no_active_package(self):
         PackageStatus.objects.create(package=self.package, status="Delivered")
@@ -542,3 +545,74 @@ class BikerSalesAndOrdersEndpointTests(APITestCase):
                     {"start_date": "2026-08-10", "end_date": "2026-08-01"},
                 )
                 self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class TransporterPackageDetailEndpointTests(APITestCase):
+    def setUp(self):
+        self.biker_user = User.objects.create_user(username="detail-driver")
+        self.other_biker_user = User.objects.create_user(username="other-driver")
+        self.biker = Biker.objects.create(user=self.biker_user)
+        self.other_biker = Biker.objects.create(user=self.other_biker_user)
+        sender_user = User.objects.create_user(
+            username="detail-sender", first_name="Tariro", last_name="Moyo"
+        )
+        receiver_user = User.objects.create_user(
+            username="detail-receiver", first_name="Nyasha", last_name="Kamba"
+        )
+        self.sender = Customer.objects.create(user=sender_user)
+        self.receiver = Customer.objects.create(user=receiver_user)
+        self.city = City.objects.create(name="Detail City")
+        self.package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            biker=self.biker,
+            pickup_address="1 Pickup Road",
+            dropoff_address="2 Dropoff Road",
+            comments="Ring the bell",
+            sender_code="111111",
+            receiver_code="222222",
+            assigned_at=timezone.now(),
+        )
+        PackageStatus.objects.create(package=self.package, status="Assigned")
+        self.collected_status = PackageStatus.objects.create(
+            package=self.package, status="In Transit", comments="Collected"
+        )
+        self.invoice = Invoice.objects.create(
+            package=self.package,
+            amount=Decimal("12.50"),
+            payment_method="Cash",
+            is_paid=True,
+            paid_at=timezone.now(),
+        )
+        self.url = reverse("transporter_package_detail")
+
+    def test_returns_full_detail_for_the_authenticated_bikers_package(self):
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.get(self.url, {"id": self.package.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["package_id"], self.package.id)
+        self.assertEqual(response.data["sender_name"], "Tariro Moyo")
+        self.assertEqual(response.data["receiver_name"], "Nyasha Kamba")
+        self.assertEqual(response.data["current_status"], "in_transit")
+        self.assertEqual(response.data["invoice_amount"], Decimal("12.50"))
+        self.assertEqual(response.data["collected_at"], self.collected_status.updated_at)
+        self.assertEqual(
+            [item["status"] for item in response.data["status_history"]],
+            ["Assigned", "In Transit"],
+        )
+        self.assertNotIn("sender_code", response.data)
+        self.assertNotIn("receiver_code", response.data)
+
+    def test_rejects_missing_or_unassigned_package_ids(self):
+        self.client.force_authenticate(user=self.biker_user)
+
+        self.assertEqual(self.client.get(self.url).status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.package.biker = self.other_biker
+        self.package.save(update_fields=["biker"])
+        response = self.client.get(self.url, {"id": self.package.id})
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

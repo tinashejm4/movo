@@ -33,6 +33,8 @@ from .serializers import (
     CancelPackageResponseSerializer,
     DailySalesResponseSerializer,
     OrderSummaryResponseSerializer,
+    PackageDetailQuerySerializer,
+    TransporterPackageDetailSerializer,
 )
 import logging
 
@@ -474,6 +476,10 @@ class TransporterView(ViewSet):
                 package.pickup_area.name if package.pickup_area else None
             ),
             "package_pickup_address": package.pickup_address,
+            "package_dropoff_area": (
+                package.dropoff_area.name if package.dropoff_area else None
+            ),
+            "package_dropoff_address": package.dropoff_address,
             "sender_name": (
                 f"{package.sender.user.first_name} {package.sender.user.last_name}".strip()
             ),
@@ -491,6 +497,99 @@ class TransporterView(ViewSet):
         }
 
         return Response({"assignment": payload}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Biker Stuff"],
+        parameters=[PackageDetailQuerySerializer],
+        responses={
+            200: TransporterPackageDetailSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Incorrect request parameters",
+            ),
+            404: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Package was not found for this biker",
+            ),
+        },
+    )
+    def package_detail(self, request):
+        """Return the authenticated biker's full, non-sensitive package details."""
+        query_serializer = PackageDetailQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        package_id = query_serializer.validated_data["id"]
+
+        package_statuses = PackageStatus.objects.filter(package=OuterRef("pk"))
+        latest_status = package_statuses.order_by("-updated_at", "-pk").values(
+            "status"
+        )[:1]
+        first_collection = (
+            package_statuses.filter(status="In Transit")
+            .order_by("updated_at", "pk")
+            .values("updated_at")[:1]
+        )
+        package = (
+            Package.objects.filter(id=package_id, biker__user=request.user)
+            .select_related(
+                "sender__user",
+                "receiver__user",
+                "city",
+                "pickup_area",
+                "dropoff_area",
+                "invoice",
+            )
+            .annotate(
+                latest_status=Subquery(latest_status),
+                collected_at=Subquery(first_collection),
+            )
+            .first()
+        )
+        if not package:
+            return Response(
+                {"error": "Package not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        status_history = list(
+            PackageStatus.objects.filter(package=package).order_by("updated_at", "pk")
+        )
+        contacts = {
+            contact.user_id: contact.phone_number
+            for contact in Contact.objects.filter(
+                user_id__in=[package.sender.user_id, package.receiver.user_id]
+            )
+        }
+        invoice = getattr(package, "invoice", None)
+        payload = {
+            "package_id": package.id,
+            "slug": package.slug,
+            "sender_name": package.sender.user.get_full_name().strip(),
+            "sender_phone": contacts.get(package.sender.user_id),
+            "receiver_name": package.receiver.user.get_full_name().strip(),
+            "receiver_phone": contacts.get(package.receiver.user_id),
+            "city": package.city.name,
+            "pickup_area": package.pickup_area.name if package.pickup_area else None,
+            "pickup_address": package.pickup_address,
+            "dropoff_area": package.dropoff_area.name if package.dropoff_area else None,
+            "dropoff_address": package.dropoff_address,
+            "comments": package.comments,
+            "is_fast_delivery": package.is_fast_delivery,
+            "is_sender_initiated": package.is_sender_initiated,
+            "assigned_at": package.assigned_at,
+            "collected_at": package.collected_at,
+            "delivered_at": package.delivered_at,
+            "added_at": package.added_at,
+            "current_status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(package.latest_status),
+            "invoice_id": invoice.id if invoice else None,
+            "status_history": [
+                {
+                    "status": status_record.status,
+                    "comments": status_record.comments,
+                    "updated_at": status_record.updated_at,
+                }
+                for status_record in status_history
+            ],
+        }
+        return Response(TransporterPackageDetailSerializer(payload).data)
 
     @extend_schema(
         tags=["Biker Stuff"],
