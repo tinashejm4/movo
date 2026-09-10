@@ -291,6 +291,16 @@ class CurrentAssignmentEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data["assignment"])
 
+    def test_get_excludes_active_assignment_from_a_previous_day(self):
+        self.package.assigned_at = timezone.now() - timedelta(days=1)
+        self.package.save(update_fields=["assigned_at"])
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["assignment"])
+
 
 class ConfirmCashReceivedEndpointTests(APITestCase):
     def setUp(self):
@@ -335,6 +345,15 @@ class ConfirmCashReceivedEndpointTests(APITestCase):
         self.assertEqual(sale.amount, 18.75)
         self.assertEqual(sale.account.owner, self.biker_user)
 
+    def test_driver_confirmation_accepts_assigned_package(self):
+        PackageStatus.objects.create(package=self.package, status="Assigned")
+
+        response = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.invoice.refresh_from_db()
+        self.assertTrue(self.invoice.is_paid)
+
     def test_confirmation_is_idempotent_and_does_not_duplicate_sales(self):
         first = self.client.post(self.url, {"package_id": self.package.id}, format="json")
         PackageStatus.objects.create(package=self.package, status="In Transit")
@@ -371,6 +390,7 @@ class ConfirmCashReceivedEndpointTests(APITestCase):
 
     def test_pickup_requires_explicit_cash_confirmation(self):
         pickup_url = reverse("pickup_package")
+        PackageStatus.objects.create(package=self.package, status="Assigned")
 
         unpaid_response = self.client.post(
             pickup_url,

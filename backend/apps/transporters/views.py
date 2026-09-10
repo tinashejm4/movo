@@ -259,10 +259,10 @@ class TransporterView(ViewSet):
             .order_by("-updated_at")
             .first()
         )
-        if latest_status and latest_status.status != "Pending":
+        if latest_status and latest_status.status not in ["Pending", "Assigned"]:
             return Response(
                 {
-                    "error": "Package should be Pending. Current status: "
+                    "error": "Package should be Pending or Assigned. Current status: "
                     + latest_status.status.lower()
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -448,6 +448,7 @@ class TransporterView(ViewSet):
             )
             .annotate(current_status=Subquery(latest_status))
             .filter(current_status__in=["Pending", "Assigned", "In Transit"])
+            .filter(assigned_at__date=timezone.localdate())
             .order_by("-assigned_at", "-added_at")
             .first()
         )

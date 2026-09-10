@@ -58,10 +58,13 @@ def confirm_cash_received(*, package_id, biker_user):
         .order_by("-updated_at", "-pk")
         .first()
     )
-    required_status = "In Transit" if invoice.is_pay_forward else "Pending"
-    if not latest_status or latest_status.status != required_status:
+    required_statuses = {"In Transit"} if invoice.is_pay_forward else {"Pending", "Assigned"}
+    required_status_label = (
+        "In Transit" if invoice.is_pay_forward else "Pending or Assigned"
+    )
+    if not latest_status or latest_status.status not in required_statuses:
         raise CashConfirmationError(
-            f"Cash can only be confirmed when the package is {required_status}"
+            f"Cash can only be confirmed when the package is {required_status_label}"
         )
 
     if not sale:
