@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.users.models import City, Customer
+from apps.users.models import Biker, City, Customer
 
 from ..models import (
     EcocashPayment,
@@ -154,6 +154,10 @@ class PackagePaymentAccessTests(APITestCase):
         self.other_user = User.objects.create_user(
             username="0779000103", password="pass"
         )
+        self.biker_user = User.objects.create_user(
+            username="0779000104", password="pass"
+        )
+        self.biker = Biker.objects.create(user=self.biker_user)
         self.sender = Customer.objects.create(user=self.sender_user)
         self.receiver = Customer.objects.create(user=self.receiver_user)
         self.package = Package.objects.create(
@@ -204,12 +208,33 @@ class PackagePaymentAccessTests(APITestCase):
 
     def test_paid_invoice_identifies_payer_but_cannot_be_paid(self):
         self.invoice.is_paid = True
-        self.invoice.save(update_fields=["is_paid"])
+        self.invoice.payment_method = "Cash"
+        self.invoice.paid_at = timezone.now()
+        self.invoice.save(update_fields=["is_paid", "payment_method", "paid_at"])
 
         response = self.get_invoice_details(self.sender_user)
 
         self.assertTrue(response.data["is_payer"])
         self.assertFalse(response.data["can_pay"])
+        self.assertEqual(response.data["payment_method"], "cash")
+        self.assertEqual(response.data["paid_at"], self.invoice.paid_at)
+
+    def test_unpaid_invoice_returns_null_payment_details(self):
+        response = self.get_invoice_details(self.sender_user)
+
+        self.assertFalse(response.data["is_paid"])
+        self.assertIsNone(response.data["payment_method"])
+        self.assertIsNone(response.data["paid_at"])
+
+    def test_non_cash_paid_invoice_is_returned_as_card(self):
+        self.invoice.is_paid = True
+        self.invoice.payment_method = "PaynowEcocash"
+        self.invoice.paid_at = timezone.now()
+        self.invoice.save(update_fields=["is_paid", "payment_method", "paid_at"])
+
+        response = self.get_invoice_details(self.sender_user)
+
+        self.assertEqual(response.data["payment_method"], "card")
 
     def test_cancelled_package_identifies_payer_but_cannot_be_paid(self):
         PackageStatus.objects.create(package=self.package, status="Cancelled")
@@ -295,6 +320,22 @@ class PackagePaymentAccessTests(APITestCase):
         self.assertEqual(invoice_response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(invoice_response.data["is_payer"])
         self.assertFalse(invoice_response.data["can_pay"])
+
+    def test_assigned_biker_can_read_invoice_but_cannot_pay_it(self):
+        self.package.biker = self.biker
+        self.package.save(update_fields=["biker"])
+
+        response = self.get_invoice_details(self.biker_user)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["invoice_id"], self.invoice.id)
+        self.assertFalse(response.data["is_payer"])
+        self.assertFalse(response.data["can_pay"])
+
+    def test_unassigned_biker_cannot_read_invoice(self):
+        response = self.get_invoice_details(self.biker_user)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_non_initiator_cannot_cancel(self):
         self.client.force_authenticate(user=self.receiver_user)

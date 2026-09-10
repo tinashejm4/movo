@@ -52,7 +52,7 @@ class InvoiceViewSet(ViewSet):
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
         package = Package.objects.select_related(
-            "sender__user", "receiver__user"
+            "sender__user", "receiver__user", "biker__user"
         ).filter(id=package_id).first()
         if not package:
             return Response(
@@ -61,6 +61,7 @@ class InvoiceViewSet(ViewSet):
         if request.user.id not in {
             package.sender.user_id,
             package.receiver.user_id,
+            package.biker.user_id if package.biker else None,
         }:
             return Response(
                 {
@@ -97,11 +98,17 @@ class InvoiceViewSet(ViewSet):
                 invoice.paid_at = timezone.now()
                 invoice.save(update_fields=["is_paid", "paid_at"])
 
+        payment_method = None
+        if invoice and invoice.is_paid:
+            payment_method = "cash" if invoice.payment_method == "Cash" else "card"
+
         serializer = InvoiceDetailsResponseSerializer(
             {
                 "package_id": package.id,
                 "invoice_id": invoice.id if invoice else None,
                 "is_paid": invoice.is_paid if invoice else None,
+                "payment_method": payment_method,
+                "paid_at": invoice.paid_at if invoice and invoice.is_paid else None,
                 "is_pay_forward": invoice.is_pay_forward if invoice else None,
                 "is_payer": invoice_user_is_payer(invoice, request.user.id),
                 "can_pay": invoice_user_can_pay(invoice, request.user.id),
