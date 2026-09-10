@@ -15,7 +15,11 @@ from apps.intracity.services.package_assignment import assign_pending_packages
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from apps.users.models import Contact, ProfileImage
 from .models import BikerDailySession
-from .services import free_drivers_and_close_packages
+from .services import (
+    CashConfirmationError,
+    confirm_cash_received,
+    free_drivers_and_close_packages,
+)
 
 
 from .serializers import (
@@ -26,6 +30,8 @@ from .serializers import (
     PickupPackageResponseSerializer,
     DropoffPackageRequestSerializer,
     DropoffPackageResponseSerializer,
+    ConfirmCashReceivedRequestSerializer,
+    ConfirmCashReceivedResponseSerializer,
     ErrorResponseSerializer,
     ActivateDeactivateRequestSerializer,
     ActivateDeactivateResponseSerializer,
@@ -268,18 +274,17 @@ class TransporterView(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not package.is_pay_forward:
-            invoice = Invoice.objects.filter(package=package).first()
-            if not invoice:
-                return Response(
-                    {
-                        "error": "Package cannot be collected because the invoice is missing"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if not invoice.is_paid:
-                self.record_cash_sale(package, invoice)
-
+        invoice = Invoice.objects.filter(package=package).first()
+        if invoice and not invoice.is_pay_forward and not invoice.is_paid:
+            return Response(
+                {"error": "Cash must be confirmed before collecting this package"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not invoice:
+            return Response(
+                {"error": "Package cannot be collected because the invoice is missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         PackageStatus.objects.create(package=package, status="In Transit")
 
         serializer = PickupPackageResponseSerializer(
@@ -358,17 +363,17 @@ class TransporterView(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if package.is_pay_forward:
-            invoice = Invoice.objects.filter(package=package).first()
-            if not invoice:
-                return Response(
-                    {
-                        "error": "Package cannot be delivered because the invoice is missing"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if not invoice.is_paid:
-                self.record_cash_sale(package, invoice)
+        invoice = Invoice.objects.filter(package=package).first()
+        if not invoice:
+            return Response(
+                {"error": "Package cannot be delivered because the invoice is missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if invoice.is_pay_forward and not invoice.is_paid:
+            return Response(
+                {"error": "Cash must be confirmed before delivering this package"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         PackageStatus.objects.create(package=package, status="Delivered")
         package.delivered_at = timezone.now()
@@ -389,40 +394,34 @@ class TransporterView(ViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @staticmethod
-    def record_cash_sale(package, invoice):
-        if not invoice:
-            return None
+    @extend_schema(
+        tags=["Biker Stuff"],
+        request=ConfirmCashReceivedRequestSerializer,
+        responses={
+            200: ConfirmCashReceivedResponseSerializer,
+            400: OpenApiResponse(ErrorResponseSerializer),
+            403: OpenApiResponse(ErrorResponseSerializer),
+            404: OpenApiResponse(ErrorResponseSerializer),
+        },
+    )
+    def confirm_cash_received(self, request):
+        serializer = ConfirmCashReceivedRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        account = Account.objects.filter(owner=package.biker.user).first()
-        if not account:
-            return Response(
-                {"error": "Account not found"}, status=status.HTTP_404_NOT_FOUND
+        try:
+            receipt = confirm_cash_received(
+                package_id=serializer.validated_data["package_id"],
+                biker_user=request.user,
             )
+        except CashConfirmationError as error:
+            return Response({"error": str(error)}, status=error.status_code)
 
-        IntracitySale.objects.get_or_create(
-            invoice=invoice,
-            defaults={
-                "account": account,
-                "amount": float(invoice.amount),
-            },
+        return Response(
+            ConfirmCashReceivedResponseSerializer(
+                {"message": "Cash received and recorded successfully", **receipt}
+            ).data,
+            status=status.HTTP_200_OK,
         )
-        invoice.payment_method = "Cash"
-        invoice.exchange_rate = None
-        invoice.is_pay_forward = False
-
-        invoice.is_paid = True
-        invoice.paid_at = timezone.now()
-        invoice.save(
-            update_fields=[
-                "payment_method",
-                "exchange_rate",
-                "is_pay_forward",
-                "is_paid",
-                "paid_at",
-            ]
-        )
-        return None
 
     @extend_schema(
         tags=["Biker Stuff"],

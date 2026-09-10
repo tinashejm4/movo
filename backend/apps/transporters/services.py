@@ -2,7 +2,94 @@ from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
-from apps.intracity.models import Package, PackageStatus
+from apps.bookkeeping.models import Account, IntracitySale
+from apps.intracity.models import Invoice, Package, PackageStatus
+
+
+class CashConfirmationError(Exception):
+    status_code = 400
+
+
+class CashConfirmationNotFound(CashConfirmationError):
+    status_code = 404
+
+
+class CashConfirmationForbidden(CashConfirmationError):
+    status_code = 403
+
+
+@transaction.atomic
+def confirm_cash_received(*, package_id, biker_user):
+    """Record a driver's confirmation that the invoice amount was received.
+
+    The invoice amount is the only amount recorded; it is never accepted from
+    the client.  Locking the package and invoice makes retries idempotent and
+    prevents duplicate cash ledger entries.
+    """
+    package = (
+        Package.objects.select_for_update()
+        .filter(pk=package_id)
+        .first()
+    )
+    if not package:
+        raise CashConfirmationNotFound("Package not found")
+    if not package.biker or package.biker.user_id != biker_user.id:
+        raise CashConfirmationForbidden("You are not assigned to this package")
+
+    invoice = Invoice.objects.select_for_update().filter(package=package).first()
+    if not invoice:
+        raise CashConfirmationError("Package cannot be paid because the invoice is missing")
+
+    sale = IntracitySale.objects.filter(invoice=invoice).first()
+    if invoice.is_paid and invoice.payment_method != "Cash":
+        raise CashConfirmationError("Invoice has already been paid electronically")
+    if invoice.is_paid and invoice.payment_method == "Cash" and sale:
+        return {
+            "invoice_id": invoice.id,
+            "package_id": package.id,
+            "amount": invoice.amount,
+            "paid_at": invoice.paid_at,
+            "sale_id": sale.id,
+        }
+
+    latest_status = (
+        PackageStatus.objects.select_for_update()
+        .filter(package=package)
+        .order_by("-updated_at", "-pk")
+        .first()
+    )
+    required_status = "In Transit" if invoice.is_pay_forward else "Pending"
+    if not latest_status or latest_status.status != required_status:
+        raise CashConfirmationError(
+            f"Cash can only be confirmed when the package is {required_status}"
+        )
+
+    if not sale:
+        account = Account.objects.filter(owner=biker_user).first()
+        if not account:
+            raise CashConfirmationError("Driver cash account not found")
+        sale = IntracitySale.objects.create(
+            account=account,
+            invoice=invoice,
+            amount=float(invoice.amount),
+        )
+
+    if not invoice.is_paid or invoice.payment_method != "Cash":
+        invoice.payment_method = "Cash"
+        invoice.exchange_rate = None
+        invoice.is_paid = True
+        invoice.paid_at = timezone.now()
+        invoice.save(
+            update_fields=["payment_method", "exchange_rate", "is_paid", "paid_at"]
+        )
+
+    return {
+        "invoice_id": invoice.id,
+        "package_id": package.id,
+        "amount": invoice.amount,
+        "paid_at": invoice.paid_at,
+        "sale_id": sale.id,
+    }
 
 
 @transaction.atomic

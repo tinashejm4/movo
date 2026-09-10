@@ -41,6 +41,19 @@ class DropoffPackageResponseSerializer(serializers.Serializer):
     status = serializers.CharField()
     delivered_at = serializers.DateTimeField()
 
+
+class ConfirmCashReceivedRequestSerializer(serializers.Serializer):
+    package_id = serializers.IntegerField()
+
+
+class ConfirmCashReceivedResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    package_id = serializers.IntegerField()
+    invoice_id = serializers.IntegerField()
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    paid_at = serializers.DateTimeField()
+    sale_id = serializers.IntegerField()
+
 class ActivateDeactivateRequestSerializer(serializers.Serializer):
     is_biker_activated = serializers.BooleanField()
 

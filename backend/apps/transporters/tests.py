@@ -292,6 +292,109 @@ class CurrentAssignmentEndpointTests(APITestCase):
         self.assertIsNone(response.data["assignment"])
 
 
+class ConfirmCashReceivedEndpointTests(APITestCase):
+    def setUp(self):
+        self.biker_user = User.objects.create_user(username="cash-driver")
+        self.other_biker_user = User.objects.create_user(username="other-cash-driver")
+        self.biker = Biker.objects.create(user=self.biker_user)
+        Account.objects.create(name="Cash account", owner=self.biker_user)
+        sender_user = User.objects.create_user(username="cash-sender")
+        receiver_user = User.objects.create_user(username="cash-receiver")
+        self.sender = Customer.objects.create(user=sender_user)
+        self.receiver = Customer.objects.create(user=receiver_user)
+        self.city = City.objects.create(name="Cash City")
+        self.package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            biker=self.biker,
+            pickup_address="Pickup",
+            dropoff_address="Dropoff",
+            sender_code="111111",
+            receiver_code="222222",
+        )
+        PackageStatus.objects.create(package=self.package, status="Pending")
+        self.invoice = Invoice.objects.create(
+            package=self.package,
+            amount=Decimal("18.75"),
+            payment_method="Cash",
+            is_pay_forward=False,
+        )
+        self.url = reverse("confirm_cash_received")
+        self.client.force_authenticate(user=self.biker_user)
+
+    def test_driver_confirmation_marks_cash_invoice_paid_and_records_invoice_amount(self):
+        response = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["amount"], Decimal("18.75"))
+        self.invoice.refresh_from_db()
+        self.assertTrue(self.invoice.is_paid)
+        self.assertEqual(self.invoice.payment_method, "Cash")
+        sale = IntracitySale.objects.get(invoice=self.invoice)
+        self.assertEqual(sale.amount, 18.75)
+        self.assertEqual(sale.account.owner, self.biker_user)
+
+    def test_confirmation_is_idempotent_and_does_not_duplicate_sales(self):
+        first = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+        PackageStatus.objects.create(package=self.package, status="In Transit")
+        second = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(IntracitySale.objects.filter(invoice=self.invoice).count(), 1)
+        self.assertEqual(first.data["sale_id"], second.data["sale_id"])
+
+    def test_only_assigned_driver_can_confirm_cash(self):
+        self.client.force_authenticate(user=self.other_biker_user)
+
+        response = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(self.invoice.is_paid)
+        self.assertFalse(IntracitySale.objects.filter(invoice=self.invoice).exists())
+
+    def test_pay_forward_cash_can_only_be_confirmed_in_transit(self):
+        self.invoice.is_pay_forward = True
+        self.invoice.save(update_fields=["is_pay_forward"])
+
+        pending_response = self.client.post(
+            self.url, {"package_id": self.package.id}, format="json"
+        )
+        PackageStatus.objects.create(package=self.package, status="In Transit")
+        in_transit_response = self.client.post(
+            self.url, {"package_id": self.package.id}, format="json"
+        )
+
+        self.assertEqual(pending_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(in_transit_response.status_code, status.HTTP_200_OK)
+
+    def test_pickup_requires_explicit_cash_confirmation(self):
+        pickup_url = reverse("pickup_package")
+
+        unpaid_response = self.client.post(
+            pickup_url,
+            {"package_id": self.package.id, "sender_code": "111111"},
+            format="json",
+        )
+        confirmation_response = self.client.post(
+            self.url, {"package_id": self.package.id}, format="json"
+        )
+        paid_response = self.client.post(
+            pickup_url,
+            {"package_id": self.package.id, "sender_code": "111111"},
+            format="json",
+        )
+
+        self.assertEqual(unpaid_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(confirmation_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(paid_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            PackageStatus.objects.filter(package=self.package, status="In Transit").count(),
+            1,
+        )
+
+
 class BikerSalesAndOrdersEndpointTests(APITestCase):
     def setUp(self):
         self.biker_user = User.objects.create_user(
