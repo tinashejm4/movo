@@ -13,5 +13,7 @@ mssql-django
 psycopg2
 channels
 channels_redis
+celery
+firebase-admin
 daphne
 whitenoise

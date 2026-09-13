@@ -38,6 +38,7 @@ def get_server_version(request):
     return JsonResponse({"server_version": server_version, "date": date})
 
 app_urlpatterns = [
+    path("api/notifications/", include("apps.notifications.urls")),
     path("api/users/", include("apps.users.urls")),
     path("api/intracity/", include("apps.intracity.urls")),
     path("api/transporters/", include("apps.transporters.urls")),

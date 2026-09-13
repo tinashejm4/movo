@@ -17,6 +17,7 @@ from apps.intracity.services.package_assignment import (
 )
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from apps.users.models import Contact, ProfileImage
+from apps.notifications.services import queue_package_customer_notification
 from .models import BikerDailySession
 from .services import (
     CashConfirmationError,
@@ -206,6 +207,10 @@ class TransporterView(ViewSet):
             comments=reason,
             updated_at=timezone.now(),
         )
+        queue_package_customer_notification(
+            package=package,
+            event_type="package.cancelled",
+        )
         logger.log(
             logging.INFO,
             f"Package {package_id} cancelled by biker {request.user.id} for reason: {reason}. Date: {timezone.now()}",
@@ -291,6 +296,10 @@ class TransporterView(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         PackageStatus.objects.create(package=package, status="In Transit")
+        queue_package_customer_notification(
+            package=package,
+            event_type="package.picked_up",
+        )
 
         serializer = PickupPackageResponseSerializer(
             {
@@ -383,6 +392,10 @@ class TransporterView(ViewSet):
         PackageStatus.objects.create(package=package, status="Delivered")
         package.delivered_at = timezone.now()
         package.save(update_fields=["delivered_at"])
+        queue_package_customer_notification(
+            package=package,
+            event_type="package.delivered",
+        )
 
         assign_pending_packages()
 

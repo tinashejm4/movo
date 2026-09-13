@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from apps.users.models import Biker, Contact,ProfileImage
 from apps.transporters.models import BikerDailySession
+from apps.notifications.services import queue_package_assignment_notifications
 
 from ..models import Package, PackageStatus
 
@@ -90,6 +91,7 @@ def assign_pending_packages():
             package.assigned_at = assigned_at
             package.save(update_fields=["biker", "assigned_at"])
             PackageStatus.objects.create(package=package, status="Assigned")
+            queue_package_assignment_notifications(package=package, biker=biker)
             assigned_packages.append(_assignment_payload(package, biker))
 
         unassigned_count = max(
