@@ -11,7 +11,10 @@ from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from apps.intracity.models import Package, PackageStatus, Invoice
-from apps.intracity.services.package_assignment import assign_pending_packages
+from apps.intracity.services.package_assignment import (
+    assign_pending_packages,
+    assign_pending_packages_safely,
+)
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from apps.users.models import Contact, ProfileImage
 from .models import BikerDailySession
@@ -97,7 +100,7 @@ class TransporterView(ViewSet):
     def get_daily_session(self, request):
         session = BikerDailySession.objects.filter(
             biker__user=request.user,
-            date=timezone.now().date(),
+            date=timezone.localdate(),
         ).first()
 
         return Response(
@@ -127,7 +130,7 @@ class TransporterView(ViewSet):
         is_biker_activated = serializer.validated_data.get("is_biker_activated")
         # Update the biker's daily session status
         session = BikerDailySession.objects.filter(
-            biker__user=request.user, date=timezone.now().date()
+            biker__user=request.user, date=timezone.localdate()
         ).first()
         if session:
             session.is_active = is_biker_activated
@@ -135,14 +138,16 @@ class TransporterView(ViewSet):
         else:
             BikerDailySession.objects.create(
                 biker=request.user.biker,
-                date=timezone.now().date(),
+                date=timezone.localdate(),
                 start_time=timezone.now(),
                 is_active=is_biker_activated,
             )
         logger.log(
             logging.INFO,
-            f"Biker {'activated' if is_biker_activated else 'deactivated'} on {timezone.now().date()}",
+            f"Biker {'activated' if is_biker_activated else 'deactivated'} on {timezone.localdate()}",
         )
+        if is_biker_activated:
+            transaction.on_commit(assign_pending_packages_safely)
         return Response(
             {"is_biker_activated": is_biker_activated},
             status=status.HTTP_200_OK,
@@ -673,7 +678,7 @@ class TransporterView(ViewSet):
                     invoice__payment_method="Cash",
                 )
             ),
-            comment=f"End of day cash transfer. Date {timezone.now().date()}",
+            comment=f"End of day cash transfer. Date {timezone.localdate()}",
             accepted_by=request.user,
         )
 

@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 
 def is_biker_busy(biker):
     """Return whether a biker has a package awaiting collection or in transit."""
-    session = BikerDailySession.objects.filter(biker=biker, date=timezone.now().date())
+    session = BikerDailySession.objects.filter(
+        biker=biker,
+        date=timezone.localdate(),
+    )
     if not session.exists():
         return True
 
@@ -30,7 +33,7 @@ def is_biker_busy(biker):
         .values("status")[:1]
     )
     return (
-        Package.objects.filter(biker=biker, added_at__date=timezone.now().date())
+        Package.objects.filter(biker=biker)
         .annotate(current_status=Subquery(latest_status))
         .filter(current_status__in=["Assigned", "In Transit"])
         .exists()
@@ -61,7 +64,7 @@ def assign_pending_packages():
 
         pending_packages = list(
             Package.objects.select_for_update()
-            .filter(added_at__date=timezone.now().date())
+            .filter(added_at__date=timezone.localdate())
             .annotate(status=Subquery(latest_status))
             .filter(status="Pending")
             .order_by("-is_fast_delivery", "added_at")
@@ -127,8 +130,10 @@ def _assignment_payload(package, biker):
         ),
         "biker_phone_number": contact.phone_number if contact else None,
         "biker_profile_pic": profile_picture.profile_image.url if profile_picture and profile_picture.profile_image else None,
-        "package_pickup_area": package.pickup_area.name if hasattr(package, "pickup_area") else None,
-        "package_pickup_address": package.pickup_address                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            if hasattr(package, "pickup_address") else None,
+        "package_pickup_area": (
+            package.pickup_area.name if package.pickup_area else None
+        ),
+        "package_pickup_address": package.pickup_address,
         "sender_name": f"{package.sender.user.first_name} {package.sender.user.last_name}",
         "sender_phone": f"+263{package.sender.user.username}",
         "receiver_name": f"{package.receiver.user.first_name} {package.receiver.user.last_name}",
