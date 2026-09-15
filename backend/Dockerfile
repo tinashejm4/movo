@@ -25,4 +25,4 @@ RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 EXPOSE ${PORT:-8000}
 
 ENTRYPOINT ["./entrypoint.sh"]
-CMD ["python", "manage.py", "runserver", "0.0.0.0:${PORT:-8000}"]
+CMD ["sh", "-c", "python manage.py runserver 0.0.0.0:${PORT:-8000}"]

@@ -183,6 +183,25 @@ class PackagePaymentAccessTests(APITestCase):
             {"package_id": self.package.id},
         )
 
+    def get_invoice_details_by_invoice_id(self, user):
+        self.client.force_authenticate(user=user)
+        return self.client.get(
+            reverse("intracity_invoice_details"),
+            {"invoice_id": self.invoice.id},
+        )
+
+    def test_invoice_can_be_looked_up_by_invoice_id(self):
+        response = self.get_invoice_details_by_invoice_id(self.sender_user)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["package_id"], self.package.id)
+        self.assertEqual(response.data["invoice_id"], self.invoice.id)
+
+    def test_unrelated_customer_cannot_read_invoice_by_invoice_id(self):
+        response = self.get_invoice_details_by_invoice_id(self.other_user)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_invoice_permissions_follow_pay_forward_not_initiator(self):
         self.package.is_sender_initiated = False
         self.package.save(update_fields=["is_sender_initiated"])

@@ -158,7 +158,7 @@ class BikerDailySessionEndpointTests(APITestCase):
     def test_get_returns_current_driver_session_state(self):
         BikerDailySession.objects.create(
             biker=self.biker,
-            date=timezone.now().date(),
+            date=timezone.localdate(),
             start_time=timezone.now(),
             is_active=True,
         )
@@ -168,6 +168,20 @@ class BikerDailySessionEndpointTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {"is_biker_activated": True})
+
+    def test_get_returns_inactive_when_only_yesterdays_session_is_active(self):
+        BikerDailySession.objects.create(
+            biker=self.biker,
+            date=timezone.localdate() - timedelta(days=1),
+            start_time=timezone.now() - timedelta(days=1),
+            is_active=True,
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"is_biker_activated": False})
 
     def test_patch_creates_driver_session_with_requested_state(self):
         self.client.force_authenticate(user=self.user)
@@ -183,14 +197,57 @@ class BikerDailySessionEndpointTests(APITestCase):
         self.assertTrue(
             BikerDailySession.objects.get(
                 biker=self.biker,
-                date=timezone.now().date(),
+                date=timezone.localdate(),
             ).is_active
         )
+
+    @patch("apps.intracity.services.package_assignment._publish_assignments")
+    def test_activation_assigns_same_day_package_waiting_for_a_driver(
+        self,
+        publish_assignments,
+    ):
+        sender = Customer.objects.create(
+            user=User.objects.create_user(username="queued-sender")
+        )
+        receiver = Customer.objects.create(
+            user=User.objects.create_user(username="queued-receiver")
+        )
+        package = Package.objects.create(
+            sender=sender,
+            receiver=receiver,
+            city=City.objects.create(name="Queued City"),
+            pickup_address="Pickup",
+            dropoff_address="Dropoff",
+            sender_code="111111",
+            receiver_code="222222",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+        self.client.force_authenticate(user=self.user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                self.url,
+                {"is_biker_activated": True},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"is_biker_activated": True})
+        package.refresh_from_db()
+        self.assertEqual(package.biker_id, self.biker.id)
+        self.assertEqual(
+            PackageStatus.objects.filter(package=package)
+            .order_by("-updated_at", "-pk")
+            .first()
+            .status,
+            "Assigned",
+        )
+        publish_assignments.assert_called_once()
 
     def test_patch_updates_session_idempotently(self):
         session = BikerDailySession.objects.create(
             biker=self.biker,
-            date=timezone.now().date(),
+            date=timezone.localdate(),
             start_time=timezone.now(),
             is_active=True,
         )
@@ -210,7 +267,7 @@ class BikerDailySessionEndpointTests(APITestCase):
         self.assertEqual(
             BikerDailySession.objects.filter(
                 biker=self.biker,
-                date=timezone.now().date(),
+                date=timezone.localdate(),
             ).count(),
             1,
         )
@@ -524,6 +581,23 @@ class BikerSalesAndOrdersEndpointTests(APITestCase):
 
         self.assertIsNone(response.data["orders"][0]["collected_at"])
 
+    def test_order_summary_returns_latest_orders_first(self):
+        older_package, _ = self.create_order(Decimal("10.00"))
+        newer_package, _ = self.create_order(Decimal("20.00"))
+        now = timezone.now()
+        Package.objects.filter(pk=older_package.pk).update(
+            added_at=now - timedelta(hours=1)
+        )
+        Package.objects.filter(pk=newer_package.pk).update(added_at=now)
+
+        response = self.client.get(reverse("get_orders"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [order["package_id"] for order in response.data["orders"]],
+            [newer_package.id, older_package.id],
+        )
+
     def test_order_summary_normalizes_payment_methods(self):
         payment_methods = [
             ("Cash", "cash"),
@@ -724,7 +798,7 @@ class TransporterPackageDetailEndpointTests(APITestCase):
         self.assertEqual(response.data["collected_at"], self.collected_status.updated_at)
         self.assertEqual(
             [item["status"] for item in response.data["status_history"]],
-            ["assigned", "in_transit"],
+            ["in_transit", "assigned"],
         )
         self.assertNotIn("sender_code", response.data)
         self.assertNotIn("receiver_code", response.data)
