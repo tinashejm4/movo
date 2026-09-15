@@ -33,6 +33,7 @@ def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery
     except ValueError as exc:
         raise PackagePricingError(str(exc)) from exc
 
+
     if transit_distance is None:
         raise PackagePricingError("distance_km is required")
     if transit_distance < 0:
