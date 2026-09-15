@@ -24,6 +24,29 @@ services:
       CHANNEL_REDIS_HEALTH_CHECK_INTERVAL: "30"
       CHANNEL_REDIS_RETRY_ON_TIMEOUT: "1"
       CHANNEL_REDIS_USE_SSL: "1"
+      CELERY_BROKER_URL: redis://redis:6379/1
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: celery -A Movo worker --loglevel=INFO
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      DB_NAME: movo_db
+      DB_USER: movo_user
+      DB_PASSWORD: movo_password
+      DB_HOST: db
+      DB_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON:-}
+      FIREBASE_CREDENTIALS_PATH: ${FIREBASE_CREDENTIALS_PATH:-}
     depends_on:
       db:
         condition: service_started

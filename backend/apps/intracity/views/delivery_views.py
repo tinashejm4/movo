@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.bookkeeping.models import Account, IntracitySale
 from apps.users.models import City, Suburb
+from apps.notifications.services import queue_package_customer_notification
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.package_assignment import assign_pending_packages
@@ -106,6 +107,10 @@ class DeliveryViewSet(ViewSet):
             )
 
         PackageStatus.objects.create(package=package, status="Cancelled", comments=reason)
+        queue_package_customer_notification(
+            package=package,
+            event_type="package.cancelled",
+        )
 
         serializer = CancelOrderResponseSerializer(
             {

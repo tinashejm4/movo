@@ -70,6 +70,7 @@ INSTALLED_APPS = [
     "channels",
     "corsheaders",
     #! Local apps
+    "apps.notifications.apps.NotificationsConfig",
     "apps.users.apps.UsersConfig",
     "apps.intercity.apps.IntercityConfig",
     "apps.intracity.apps.IntracityConfig",
@@ -204,6 +205,11 @@ def _build_channel_redis_url() -> str:
 
 
 CHANNEL_REDIS_URL = _build_channel_redis_url()
+
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_TIME_LIMIT = 60
 
 parsed_channel_redis = urlparse(CHANNEL_REDIS_URL)
 

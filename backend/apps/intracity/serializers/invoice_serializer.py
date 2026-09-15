@@ -8,7 +8,8 @@ class InvoiceErrorResponseSerializer(serializers.Serializer):
 
 
 class InvoiceDetailsQuerySerializer(serializers.Serializer):
-    package_id = serializers.IntegerField()
+    package_id = serializers.IntegerField(required=False)
+    invoice_id = serializers.IntegerField(required=False)
 
 
 class InvoiceDetailsResponseSerializer(serializers.Serializer):

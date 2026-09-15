@@ -19,6 +19,8 @@ if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ] && [ "$D
     --email "$DJANGO_SUPERUSER_EMAIL" || true
 fi
 
+echo "Starting: $*"
+exec "$@"
 
 if [ "$DEBUG" = "False" ] ; then
   echo "Running in production mode"
