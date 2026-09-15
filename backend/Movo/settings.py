@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     "apps.intracity.apps.IntracityConfig",
     "apps.bookkeeping.apps.BookkeepingConfig",
     "apps.transporters.apps.TransportersConfig",
+    "apps.admin.apps.AdminConfig",
     "apps.health.apps.HealthConfig",
 ]
 
