@@ -568,7 +568,7 @@ class TransporterView(ViewSet):
             )
 
         status_history = list(
-            PackageStatus.objects.filter(package=package).order_by("updated_at", "pk")
+            PackageStatus.objects.filter(package=package).order_by("-updated_at", "-pk")
         )
         contacts = {
             contact.user_id: contact.phone_number
@@ -600,9 +600,7 @@ class TransporterView(ViewSet):
             "invoice_id": invoice.id if invoice else None,
             "status_history": [
                 {
-                    "status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(
-                        status_record.status
-                    ),
+                    "status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(status_record.status),
                     "comments": status_record.comments,
                     "updated_at": status_record.updated_at,
                 }
@@ -742,6 +740,7 @@ class TransporterView(ViewSet):
                 current_status=Subquery(latest_status),
                 collected_at=Subquery(first_collection),
             )
+            .order_by("-added_at", "-pk")
         )
 
         # cash_collected is based on cash collection records, not inferred from

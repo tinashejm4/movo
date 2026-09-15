@@ -581,6 +581,23 @@ class BikerSalesAndOrdersEndpointTests(APITestCase):
 
         self.assertIsNone(response.data["orders"][0]["collected_at"])
 
+    def test_order_summary_returns_latest_orders_first(self):
+        older_package, _ = self.create_order(Decimal("10.00"))
+        newer_package, _ = self.create_order(Decimal("20.00"))
+        now = timezone.now()
+        Package.objects.filter(pk=older_package.pk).update(
+            added_at=now - timedelta(hours=1)
+        )
+        Package.objects.filter(pk=newer_package.pk).update(added_at=now)
+
+        response = self.client.get(reverse("get_orders"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [order["package_id"] for order in response.data["orders"]],
+            [newer_package.id, older_package.id],
+        )
+
     def test_order_summary_normalizes_payment_methods(self):
         payment_methods = [
             ("Cash", "cash"),
@@ -781,7 +798,7 @@ class TransporterPackageDetailEndpointTests(APITestCase):
         self.assertEqual(response.data["collected_at"], self.collected_status.updated_at)
         self.assertEqual(
             [item["status"] for item in response.data["status_history"]],
-            ["assigned", "in_transit"],
+            ["in_transit", "assigned"],
         )
         self.assertNotIn("sender_code", response.data)
         self.assertNotIn("receiver_code", response.data)

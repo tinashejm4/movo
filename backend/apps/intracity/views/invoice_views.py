@@ -47,13 +47,30 @@ class InvoiceViewSet(ViewSet):
 
     def invoice_details(self, request):
         package_id = request.query_params.get("package_id")
-        if not package_id:
+        invoice_id = request.query_params.get("invoice_id")
+        if not package_id and not invoice_id:
             return Response(
-                {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "package_id or invoice_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        package = Package.objects.select_related(
-            "sender__user", "receiver__user", "biker__user"
-        ).filter(id=package_id).first()
+
+        invoice = None
+        if invoice_id:
+            invoice = Invoice.objects.select_related(
+                "package__sender__user", "package__receiver__user", "package__biker__user"
+            ).filter(id=invoice_id).first()
+            if not invoice:
+                return Response(
+                    {"error": "invoice not found"}, status=status.HTTP_404_NOT_FOUND
+                )
+            package = invoice.package
+        else:
+            package = Package.objects.select_related(
+                "sender__user", "receiver__user", "biker__user"
+            ).filter(id=package_id).first()
+            if package:
+                invoice = Invoice.objects.filter(package=package).first()
+
         if not package:
             return Response(
                 {"error": "package not found"}, status=status.HTTP_404_NOT_FOUND
@@ -72,8 +89,6 @@ class InvoiceViewSet(ViewSet):
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
-        invoice = Invoice.objects.filter(package=package).first()
-
         payment_pending = invoice_has_pending_payment(invoice)
         last_saved_payment = PaynowPayment.objects.filter(invoice=invoice, is_successful=False).order_by('created_at')
 
