@@ -4,7 +4,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
-from apps.users.models import Suburb
+from apps.users.models import ProfileImage, Suburb
 from apps.users.views import request_otp
 from ..serializers.package_serializers import (
     CurrentPackageStatusSerializer,
@@ -297,7 +297,7 @@ class PackageViewSet(ViewSet):
             )
 
         package = Package.objects.select_related(
-            "sender__user", "receiver__user"
+            "sender__user", "receiver__user", "biker__user"
         ).filter(id=package_id).first()
         if not package:
             return Response(
@@ -384,6 +384,13 @@ class PackageViewSet(ViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # Automatic dispatch runs after the package-creation transaction commits.
+        # It updates a different Package instance, so reload before serializing the
+        # create response or its driver fields remain stale even after assignment.
+        package = Package.objects.select_related(
+            "sender__user", "receiver__user", "city", "biker__user"
+        ).get(pk=package.pk)
+
         status_records = list(
             PackageStatus.objects.filter(package=package).order_by("updated_at")
         )
@@ -448,6 +455,13 @@ class PackageViewSet(ViewSet):
         current_status = (
             status_records[-1].status if status_records else "Pending"
         )
+        driver_profile_picture = None
+        if package.biker:
+            profile_image = ProfileImage.objects.filter(
+                user=package.biker.user
+            ).first()
+            if profile_image and profile_image.profile_image:
+                driver_profile_picture = profile_image.profile_image.url
 
         receiver_id = package.receiver.id
         sender_id = package.sender.id
@@ -478,6 +492,7 @@ class PackageViewSet(ViewSet):
                 "driver_number": (
                     self.get_phone_number(package.biker.user) if package.biker else None
                 ),
+                "driver_profile_picture": driver_profile_picture,
                 "confirmation_code": package_confirmation_code_for_user(
                     package,
                     requester_user_id,

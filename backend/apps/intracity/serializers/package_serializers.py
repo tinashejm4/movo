@@ -29,6 +29,9 @@ class PackageDetailRequestSerializer(serializers.Serializer):
     driver_id = serializers.IntegerField(allow_null=True, required=False)
     driver_name = serializers.CharField(allow_null=True, allow_blank=True)
     driver_number = serializers.CharField(allow_null=True, allow_blank=True)
+    driver_profile_picture = serializers.CharField(
+        allow_null=True, allow_blank=True, required=False
+    )
     driver_assigned_at = serializers.DateTimeField(allow_null=True)
     invoice_id = serializers.IntegerField(allow_null=True, required=False)
     invoice_amount = serializers.DecimalField(

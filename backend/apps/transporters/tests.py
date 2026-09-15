@@ -275,6 +275,9 @@ class CurrentAssignmentEndpointTests(APITestCase):
         self.assertEqual(response.data["assignment"]["biker_id"], self.biker.id)
         self.assertEqual(response.data["assignment"]["sender_name"], "Sender One")
         self.assertEqual(response.data["assignment"]["receiver_name"], "Receiver One")
+        self.assertEqual(
+            response.data["assignment"]["package_dropoff_address"], "Dropoff Street"
+        )
 
     def test_get_returns_no_assignment_when_biker_has_no_active_package(self):
         PackageStatus.objects.create(package=self.package, status="Delivered")
@@ -287,6 +290,129 @@ class CurrentAssignmentEndpointTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data["assignment"])
+
+    def test_get_excludes_active_assignment_from_a_previous_day(self):
+        self.package.assigned_at = timezone.now() - timedelta(days=1)
+        self.package.save(update_fields=["assigned_at"])
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["assignment"])
+
+
+class ConfirmCashReceivedEndpointTests(APITestCase):
+    def setUp(self):
+        self.biker_user = User.objects.create_user(username="cash-driver")
+        self.other_biker_user = User.objects.create_user(username="other-cash-driver")
+        self.biker = Biker.objects.create(user=self.biker_user)
+        Account.objects.create(name="Cash account", owner=self.biker_user)
+        sender_user = User.objects.create_user(username="cash-sender")
+        receiver_user = User.objects.create_user(username="cash-receiver")
+        self.sender = Customer.objects.create(user=sender_user)
+        self.receiver = Customer.objects.create(user=receiver_user)
+        self.city = City.objects.create(name="Cash City")
+        self.package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            biker=self.biker,
+            pickup_address="Pickup",
+            dropoff_address="Dropoff",
+            sender_code="111111",
+            receiver_code="222222",
+        )
+        PackageStatus.objects.create(package=self.package, status="Pending")
+        self.invoice = Invoice.objects.create(
+            package=self.package,
+            amount=Decimal("18.75"),
+            payment_method="Cash",
+            is_pay_forward=False,
+        )
+        self.url = reverse("confirm_cash_received")
+        self.client.force_authenticate(user=self.biker_user)
+
+    def test_driver_confirmation_marks_cash_invoice_paid_and_records_invoice_amount(self):
+        response = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["amount"], Decimal("18.75"))
+        self.invoice.refresh_from_db()
+        self.assertTrue(self.invoice.is_paid)
+        self.assertEqual(self.invoice.payment_method, "Cash")
+        sale = IntracitySale.objects.get(invoice=self.invoice)
+        self.assertEqual(sale.amount, 18.75)
+        self.assertEqual(sale.account.owner, self.biker_user)
+
+    def test_driver_confirmation_accepts_assigned_package(self):
+        PackageStatus.objects.create(package=self.package, status="Assigned")
+
+        response = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.invoice.refresh_from_db()
+        self.assertTrue(self.invoice.is_paid)
+
+    def test_confirmation_is_idempotent_and_does_not_duplicate_sales(self):
+        first = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+        PackageStatus.objects.create(package=self.package, status="In Transit")
+        second = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(IntracitySale.objects.filter(invoice=self.invoice).count(), 1)
+        self.assertEqual(first.data["sale_id"], second.data["sale_id"])
+
+    def test_only_assigned_driver_can_confirm_cash(self):
+        self.client.force_authenticate(user=self.other_biker_user)
+
+        response = self.client.post(self.url, {"package_id": self.package.id}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(self.invoice.is_paid)
+        self.assertFalse(IntracitySale.objects.filter(invoice=self.invoice).exists())
+
+    def test_pay_forward_cash_can_only_be_confirmed_in_transit(self):
+        self.invoice.is_pay_forward = True
+        self.invoice.save(update_fields=["is_pay_forward"])
+
+        pending_response = self.client.post(
+            self.url, {"package_id": self.package.id}, format="json"
+        )
+        PackageStatus.objects.create(package=self.package, status="In Transit")
+        in_transit_response = self.client.post(
+            self.url, {"package_id": self.package.id}, format="json"
+        )
+
+        self.assertEqual(pending_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(in_transit_response.status_code, status.HTTP_200_OK)
+
+    def test_pickup_requires_explicit_cash_confirmation(self):
+        pickup_url = reverse("pickup_package")
+        PackageStatus.objects.create(package=self.package, status="Assigned")
+
+        unpaid_response = self.client.post(
+            pickup_url,
+            {"package_id": self.package.id, "sender_code": "111111"},
+            format="json",
+        )
+        confirmation_response = self.client.post(
+            self.url, {"package_id": self.package.id}, format="json"
+        )
+        paid_response = self.client.post(
+            pickup_url,
+            {"package_id": self.package.id, "sender_code": "111111"},
+            format="json",
+        )
+
+        self.assertEqual(unpaid_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(confirmation_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(paid_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            PackageStatus.objects.filter(package=self.package, status="In Transit").count(),
+            1,
+        )
 
 
 class BikerSalesAndOrdersEndpointTests(APITestCase):
@@ -542,3 +668,74 @@ class BikerSalesAndOrdersEndpointTests(APITestCase):
                     {"start_date": "2026-08-10", "end_date": "2026-08-01"},
                 )
                 self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class TransporterPackageDetailEndpointTests(APITestCase):
+    def setUp(self):
+        self.biker_user = User.objects.create_user(username="detail-driver")
+        self.other_biker_user = User.objects.create_user(username="other-driver")
+        self.biker = Biker.objects.create(user=self.biker_user)
+        self.other_biker = Biker.objects.create(user=self.other_biker_user)
+        sender_user = User.objects.create_user(
+            username="detail-sender", first_name="Tariro", last_name="Moyo"
+        )
+        receiver_user = User.objects.create_user(
+            username="detail-receiver", first_name="Nyasha", last_name="Kamba"
+        )
+        self.sender = Customer.objects.create(user=sender_user)
+        self.receiver = Customer.objects.create(user=receiver_user)
+        self.city = City.objects.create(name="Detail City")
+        self.package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            biker=self.biker,
+            pickup_address="1 Pickup Road",
+            dropoff_address="2 Dropoff Road",
+            comments="Ring the bell",
+            sender_code="111111",
+            receiver_code="222222",
+            assigned_at=timezone.now(),
+        )
+        PackageStatus.objects.create(package=self.package, status="Assigned")
+        self.collected_status = PackageStatus.objects.create(
+            package=self.package, status="In Transit", comments="Collected"
+        )
+        self.invoice = Invoice.objects.create(
+            package=self.package,
+            amount=Decimal("12.50"),
+            payment_method="Cash",
+            is_paid=True,
+            paid_at=timezone.now(),
+        )
+        self.url = reverse("transporter_package_detail")
+
+    def test_returns_full_detail_for_the_authenticated_bikers_package(self):
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.get(self.url, {"id": self.package.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["package_id"], self.package.id)
+        self.assertEqual(response.data["sender_name"], "Tariro Moyo")
+        self.assertEqual(response.data["receiver_name"], "Nyasha Kamba")
+        self.assertEqual(response.data["current_status"], "in_transit")
+        self.assertEqual(response.data["invoice_amount"], Decimal("12.50"))
+        self.assertEqual(response.data["collected_at"], self.collected_status.updated_at)
+        self.assertEqual(
+            [item["status"] for item in response.data["status_history"]],
+            ["assigned", "in_transit"],
+        )
+        self.assertNotIn("sender_code", response.data)
+        self.assertNotIn("receiver_code", response.data)
+
+    def test_rejects_missing_or_unassigned_package_ids(self):
+        self.client.force_authenticate(user=self.biker_user)
+
+        self.assertEqual(self.client.get(self.url).status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.package.biker = self.other_biker
+        self.package.save(update_fields=["biker"])
+        response = self.client.get(self.url, {"id": self.package.id})
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

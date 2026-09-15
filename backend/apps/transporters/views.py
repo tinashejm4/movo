@@ -15,7 +15,11 @@ from apps.intracity.services.package_assignment import assign_pending_packages
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from apps.users.models import Contact, ProfileImage
 from .models import BikerDailySession
-from .services import free_drivers_and_close_packages
+from .services import (
+    CashConfirmationError,
+    confirm_cash_received,
+    free_drivers_and_close_packages,
+)
 
 
 from .serializers import (
@@ -26,6 +30,8 @@ from .serializers import (
     PickupPackageResponseSerializer,
     DropoffPackageRequestSerializer,
     DropoffPackageResponseSerializer,
+    ConfirmCashReceivedRequestSerializer,
+    ConfirmCashReceivedResponseSerializer,
     ErrorResponseSerializer,
     ActivateDeactivateRequestSerializer,
     ActivateDeactivateResponseSerializer,
@@ -33,6 +39,8 @@ from .serializers import (
     CancelPackageResponseSerializer,
     DailySalesResponseSerializer,
     OrderSummaryResponseSerializer,
+    PackageDetailQuerySerializer,
+    TransporterPackageDetailSerializer,
 )
 import logging
 
@@ -251,10 +259,10 @@ class TransporterView(ViewSet):
             .order_by("-updated_at")
             .first()
         )
-        if latest_status and latest_status.status != "Pending":
+        if latest_status and latest_status.status not in ["Pending", "Assigned"]:
             return Response(
                 {
-                    "error": "Package should be Pending. Current status: "
+                    "error": "Package should be Pending or Assigned. Current status: "
                     + latest_status.status.lower()
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -266,18 +274,17 @@ class TransporterView(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not package.is_pay_forward:
-            invoice = Invoice.objects.filter(package=package).first()
-            if not invoice:
-                return Response(
-                    {
-                        "error": "Package cannot be collected because the invoice is missing"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if not invoice.is_paid:
-                self.record_cash_sale(package, invoice)
-
+        invoice = Invoice.objects.filter(package=package).first()
+        if invoice and not invoice.is_pay_forward and not invoice.is_paid:
+            return Response(
+                {"error": "Cash must be confirmed before collecting this package"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not invoice:
+            return Response(
+                {"error": "Package cannot be collected because the invoice is missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         PackageStatus.objects.create(package=package, status="In Transit")
 
         serializer = PickupPackageResponseSerializer(
@@ -356,17 +363,17 @@ class TransporterView(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if package.is_pay_forward:
-            invoice = Invoice.objects.filter(package=package).first()
-            if not invoice:
-                return Response(
-                    {
-                        "error": "Package cannot be delivered because the invoice is missing"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if not invoice.is_paid:
-                self.record_cash_sale(package, invoice)
+        invoice = Invoice.objects.filter(package=package).first()
+        if not invoice:
+            return Response(
+                {"error": "Package cannot be delivered because the invoice is missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if invoice.is_pay_forward and not invoice.is_paid:
+            return Response(
+                {"error": "Cash must be confirmed before delivering this package"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         PackageStatus.objects.create(package=package, status="Delivered")
         package.delivered_at = timezone.now()
@@ -387,40 +394,34 @@ class TransporterView(ViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @staticmethod
-    def record_cash_sale(package, invoice):
-        if not invoice:
-            return None
+    @extend_schema(
+        tags=["Biker Stuff"],
+        request=ConfirmCashReceivedRequestSerializer,
+        responses={
+            200: ConfirmCashReceivedResponseSerializer,
+            400: OpenApiResponse(ErrorResponseSerializer),
+            403: OpenApiResponse(ErrorResponseSerializer),
+            404: OpenApiResponse(ErrorResponseSerializer),
+        },
+    )
+    def confirm_cash_received(self, request):
+        serializer = ConfirmCashReceivedRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        account = Account.objects.filter(owner=package.biker.user).first()
-        if not account:
-            return Response(
-                {"error": "Account not found"}, status=status.HTTP_404_NOT_FOUND
+        try:
+            receipt = confirm_cash_received(
+                package_id=serializer.validated_data["package_id"],
+                biker_user=request.user,
             )
+        except CashConfirmationError as error:
+            return Response({"error": str(error)}, status=error.status_code)
 
-        IntracitySale.objects.get_or_create(
-            invoice=invoice,
-            defaults={
-                "account": account,
-                "amount": float(invoice.amount),
-            },
+        return Response(
+            ConfirmCashReceivedResponseSerializer(
+                {"message": "Cash received and recorded successfully", **receipt}
+            ).data,
+            status=status.HTTP_200_OK,
         )
-        invoice.payment_method = "Cash"
-        invoice.exchange_rate = None
-        invoice.is_pay_forward = False
-
-        invoice.is_paid = True
-        invoice.paid_at = timezone.now()
-        invoice.save(
-            update_fields=[
-                "payment_method",
-                "exchange_rate",
-                "is_pay_forward",
-                "is_paid",
-                "paid_at",
-            ]
-        )
-        return None
 
     @extend_schema(
         tags=["Biker Stuff"],
@@ -447,6 +448,7 @@ class TransporterView(ViewSet):
             )
             .annotate(current_status=Subquery(latest_status))
             .filter(current_status__in=["Pending", "Assigned", "In Transit"])
+            .filter(assigned_at__date=timezone.localdate())
             .order_by("-assigned_at", "-added_at")
             .first()
         )
@@ -474,6 +476,10 @@ class TransporterView(ViewSet):
                 package.pickup_area.name if package.pickup_area else None
             ),
             "package_pickup_address": package.pickup_address,
+            "package_dropoff_area": (
+                package.dropoff_area.name if package.dropoff_area else None
+            ),
+            "package_dropoff_address": package.dropoff_address,
             "sender_name": (
                 f"{package.sender.user.first_name} {package.sender.user.last_name}".strip()
             ),
@@ -491,6 +497,101 @@ class TransporterView(ViewSet):
         }
 
         return Response({"assignment": payload}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Biker Stuff"],
+        parameters=[PackageDetailQuerySerializer],
+        responses={
+            200: TransporterPackageDetailSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Incorrect request parameters",
+            ),
+            404: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Package was not found for this biker",
+            ),
+        },
+    )
+    def package_detail(self, request):
+        """Return the authenticated biker's full, non-sensitive package details."""
+        query_serializer = PackageDetailQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        package_id = query_serializer.validated_data["id"]
+
+        package_statuses = PackageStatus.objects.filter(package=OuterRef("pk"))
+        latest_status = package_statuses.order_by("-updated_at", "-pk").values(
+            "status"
+        )[:1]
+        first_collection = (
+            package_statuses.filter(status="In Transit")
+            .order_by("updated_at", "pk")
+            .values("updated_at")[:1]
+        )
+        package = (
+            Package.objects.filter(id=package_id, biker__user=request.user)
+            .select_related(
+                "sender__user",
+                "receiver__user",
+                "city",
+                "pickup_area",
+                "dropoff_area",
+                "invoice",
+            )
+            .annotate(
+                latest_status=Subquery(latest_status),
+                collected_at=Subquery(first_collection),
+            )
+            .first()
+        )
+        if not package:
+            return Response(
+                {"error": "Package not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        status_history = list(
+            PackageStatus.objects.filter(package=package).order_by("updated_at", "pk")
+        )
+        contacts = {
+            contact.user_id: contact.phone_number
+            for contact in Contact.objects.filter(
+                user_id__in=[package.sender.user_id, package.receiver.user_id]
+            )
+        }
+        invoice = getattr(package, "invoice", None)
+        payload = {
+            "package_id": package.id,
+            "slug": package.slug,
+            "sender_name": package.sender.user.get_full_name().strip(),
+            "sender_phone": contacts.get(package.sender.user_id),
+            "receiver_name": package.receiver.user.get_full_name().strip(),
+            "receiver_phone": contacts.get(package.receiver.user_id),
+            "city": package.city.name,
+            "pickup_area": package.pickup_area.name if package.pickup_area else None,
+            "pickup_address": package.pickup_address,
+            "dropoff_area": package.dropoff_area.name if package.dropoff_area else None,
+            "dropoff_address": package.dropoff_address,
+            "comments": package.comments,
+            "is_fast_delivery": package.is_fast_delivery,
+            "is_sender_initiated": package.is_sender_initiated,
+            "assigned_at": package.assigned_at,
+            "collected_at": package.collected_at,
+            "delivered_at": package.delivered_at,
+            "added_at": package.added_at,
+            "current_status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(package.latest_status),
+            "invoice_id": invoice.id if invoice else None,
+            "status_history": [
+                {
+                    "status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(
+                        status_record.status
+                    ),
+                    "comments": status_record.comments,
+                    "updated_at": status_record.updated_at,
+                }
+                for status_record in status_history
+            ],
+        }
+        return Response(TransporterPackageDetailSerializer(payload).data)
 
     @extend_schema(
         tags=["Biker Stuff"],

@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework.response import Response
 
-from apps.users.models import Biker, City, Contact, Customer
+from apps.users.models import Biker, City, Contact, Customer, ProfileImage
 
 from ..models import Invoice, Package, PackageStatus
 
@@ -240,6 +240,34 @@ class IntracityPackageListTests(APITestCase):
             {"package_id": package.id},
         )
         self.assertEqual(response.data["initiator_id"], self.receiver.user_id)
+
+    def test_package_detail_includes_assigned_driver_profile_picture(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            biker=self.driver,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="555555",
+            receiver_code="666666",
+        )
+        PackageStatus.objects.create(package=package, status="Assigned")
+        ProfileImage.objects.create(
+            user=self.driver_user,
+            profile_image="profile_pics/rider-one.jpg",
+        )
+
+        response = self.client.get(
+            reverse("intracity_package_detail"),
+            {"package_id": package.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["driver_profile_picture"],
+            "/media/profile_pics/rider-one.jpg",
+        )
 
     def test_package_detail_returns_only_sender_confirmation_code_to_sender(self):
         package = Package.objects.create(
