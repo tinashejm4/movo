@@ -205,7 +205,47 @@ def _build_channel_redis_url() -> str:
 
 CHANNEL_REDIS_URL = _build_channel_redis_url()
 
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
+
+def _build_celery_broker_url() -> str:
+    """Return the explicit broker URL, or select the appropriate Redis service.
+
+    Local Compose runs its own ``redis`` service. In production the web and
+    worker processes must use the same managed Redis instance, so derive the
+    Celery URL from the Redis credentials already used by Channels. Keeping an
+    explicit ``CELERY_BROKER_URL`` as the first choice still supports a
+    separately managed broker when one is deliberately configured.
+    """
+    explicit_url = os.environ.get("CELERY_BROKER_URL", "").strip()
+    if explicit_url:
+        return explicit_url
+
+    if DEBUG:
+        return "redis://redis:6379/1"
+
+    host = os.environ.get("CELERY_REDIS_HOST", CHANNEL_REDIS_HOST)
+    port = os.environ.get("CELERY_REDIS_PORT", str(CHANNEL_REDIS_PORT))
+    username = os.environ.get("CELERY_REDIS_USERNAME", CHANNEL_REDIS_USERNAME)
+    password = os.environ.get("CELERY_REDIS_PASSWORD", CHANNEL_REDIS_PASSWORD)
+    database = os.environ.get("CELERY_REDIS_DB", CHANNEL_REDIS_DB)
+    use_ssl = os.environ.get(
+        "CELERY_REDIS_USE_SSL", "1" if CHANNEL_REDIS_USE_SSL else "0"
+    ) == "1"
+
+    encoded_username = quote(username, safe="") if username else ""
+    encoded_password = quote(password, safe="") if password else ""
+    if encoded_username and encoded_password:
+        auth_segment = f"{encoded_username}:{encoded_password}@"
+    elif encoded_password:
+        auth_segment = f":{encoded_password}@"
+    else:
+        auth_segment = ""
+
+    scheme = "rediss" if use_ssl else "redis"
+    ssl_query = "?ssl_cert_reqs=required" if use_ssl else ""
+    return f"{scheme}://{auth_segment}{host}:{port}/{database}{ssl_query}"
+
+
+CELERY_BROKER_URL = _build_celery_broker_url()
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_TIME_LIMIT = 60

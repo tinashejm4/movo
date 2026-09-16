@@ -11,20 +11,14 @@ services:
     env_file:
       - .env
     environment:
-      DEBUG: "1"
+      # Local defaults. Production supplies DEBUG=0 and the managed Redis
+      # credentials through its environment instead of these Compose defaults.
+      DEBUG: ${DEBUG:-1}
       DB_NAME: movo_db
       DB_USER: movo_user
       DB_PASSWORD: movo_password
       DB_HOST: db
       DB_PORT: "5432"
-      CHANNEL_REDIS_HOST: "redis-13875.c282.east-us-mz.azure.cloud.redislabs.com"
-      CHANNEL_REDIS_PORT: "13875"
-      CHANNEL_REDIS_SOCKET_TIMEOUT: "60"
-      CHANNEL_REDIS_SOCKET_CONNECT_TIMEOUT: "60"
-      CHANNEL_REDIS_HEALTH_CHECK_INTERVAL: "30"
-      CHANNEL_REDIS_RETRY_ON_TIMEOUT: "1"
-      CHANNEL_REDIS_USE_SSL: "1"
-      CELERY_BROKER_URL: redis://redis:6379/1
     depends_on:
       db:
         condition: service_started
@@ -39,12 +33,12 @@ services:
     env_file:
       - .env
     environment:
+      DEBUG: ${DEBUG:-1}
       DB_NAME: movo_db
       DB_USER: movo_user
       DB_PASSWORD: movo_password
       DB_HOST: db
       DB_PORT: "5432"
-      CELERY_BROKER_URL: redis://redis:6379/1
       FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON:-}
       FIREBASE_CREDENTIALS_PATH: ${FIREBASE_CREDENTIALS_PATH:-}
     depends_on:
