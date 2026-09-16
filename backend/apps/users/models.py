@@ -4,6 +4,9 @@ from django.utils import timezone
 
 from django.contrib.auth.models import User
 from django.db import models
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 class Branch(models.Model):
     name = models.CharField(max_length=100)
@@ -87,10 +90,12 @@ class OTP(models.Model):
 
 
 class Suburb(models.Model):
+    DISTANCE_CORRECTION_REFERENCE_KM = 10.0
+    DISTANCE_CORRECTION_REFERENCE_FACTOR = 1.3
+
     city = models.ForeignKey('City', on_delete=models.CASCADE, related_name='suburbs')
     name = models.CharField(max_length=100)
-    x_pos = models.DecimalField(max_digits=10, decimal_places=3)
-    y_pos = models.DecimalField(max_digits=10, decimal_places=3)
+    is_active = models.BooleanField(default=False)
     x_coord = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     y_coord = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
 
@@ -101,20 +106,26 @@ class Suburb(models.Model):
         ordering = ['city_id', 'name']
 
     def __str__(self):
-        return f'{self.name} ({self.city.name}) @ ({self.x_pos}, {self.y_pos})'
+        return f'{self.name} ({self.city.name}) @ ({self.x_coord}, {self.y_coord}) is {"active" if self.is_active else "inactive"}'
 
     def distance_to(self, other):
-        
         if not isinstance(other, Suburb):
             raise TypeError('distance_to expects a Suburb instance')
         if self.city_id != other.city_id:
             raise ValueError('Cannot calculate distance between suburbs in different cities')
 
-        x1 = float(self.x_pos)
-        y1 = float(self.y_pos)
-        x2 = float(other.x_pos)
-        y2 = float(other.y_pos)
-        return math.dist((x1, y1), (x2, y2))
+        x1 = float(self.x_coord)
+        y1 = float(self.y_coord)
+        x2 = float(other.x_coord)
+        y2 = float(other.y_coord)
+        coordinate_distance_km = math.dist((x1, y1), (x2, y2)) * 111  # Approximate conversion from degrees to kilometers
+        correction_slope = (
+            self.DISTANCE_CORRECTION_REFERENCE_FACTOR - 1
+        ) / self.DISTANCE_CORRECTION_REFERENCE_KM
+        correction_factor = 1 + (correction_slope * coordinate_distance_km)
+        distance_km = coordinate_distance_km * correction_factor
+
+        return distance_km
 
 class City(models.Model):
     name = models.CharField(max_length=100)

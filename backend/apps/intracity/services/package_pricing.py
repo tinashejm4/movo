@@ -1,8 +1,11 @@
+from decimal import Decimal
 import math
+from venv import logger
+from django.utils import timezone
 
 from apps.users.models import City, Suburb
-
-from ..models import Price
+from django.db.models import OuterRef, Subquery
+from ..models import Price, Package, PackageStatus
 
 
 class PackagePricingError(Exception):
@@ -13,27 +16,27 @@ class PackagePricingNotFound(PackagePricingError):
     pass
 
 
-def calculate_package_price(
-    *,
-    from_suburb_id,
-    to_suburb_id,
-    city_id=None,
-    is_fast_delivery=False,
-):
+def calculate_package_price(from_suburb_id,to_suburb_id,city_id,is_fast_delivery=False):
     try:
         from_suburb = Suburb.objects.get(id=from_suburb_id)
         to_suburb = Suburb.objects.get(id=to_suburb_id)
+        cbd = Suburb.objects.get(city_id=city_id, name = "CBD")
     except Suburb.DoesNotExist as exc:
         raise PackagePricingNotFound("suburb not found") from exc
 
+    collection_distance = 0
+    if cbd not in [from_suburb, to_suburb]:
+        collection_distance = from_suburb.distance_to(cbd)
+    
     try:
-        distance_km = from_suburb.distance_to(to_suburb)
+        transit_distance = from_suburb.distance_to(to_suburb)
     except ValueError as exc:
         raise PackagePricingError(str(exc)) from exc
 
-    if distance_km is None:
+
+    if transit_distance is None:
         raise PackagePricingError("distance_km is required")
-    if distance_km < 0:
+    if transit_distance < 0:
         raise PackagePricingError("distance_km must be zero or positive")
 
     if isinstance(is_fast_delivery, str):
@@ -55,18 +58,41 @@ def calculate_package_price(
     if price is None:
         raise PackagePricingError("No pricing configured for this city")
 
-    amount = float(price.base_price) + (
-        float(price.rate_per_km) * distance_km
+    latest_status = (
+        PackageStatus.objects.filter(package=OuterRef("pk"))
+        .order_by("-updated_at", "-pk")
+        .values("status")[:1]
     )
+
+    pending_packages_count = (
+        Package.objects.select_for_update()
+        .filter(added_at__date=timezone.now().date())
+        .annotate(status=Subquery(latest_status))
+        .filter(status="Pending").count()
+    )
+
+    amount = float(price.base_price) + (
+        float(price.rate_per_km) * (transit_distance + collection_distance)
+    ) + (pending_packages_count / 10)
+
     if fast_delivery:
-        amount *= float(price.fast_delivery_multiplier)
+
+        pending_packages_fast_delivery_count = (
+            Package.objects.select_for_update()
+            .filter(added_at__date=timezone.now().date())
+            .annotate(status=Subquery(latest_status))
+            .filter(status="Pending", is_fast_delivery=True).count()
+        )
+
+        fast_delivery_amount = min(3, amount, 1.5+(pending_packages_fast_delivery_count / 4))
+        amount += fast_delivery_amount
 
     decimal_part = amount - math.floor(amount)
-    amount = math.ceil(amount) if decimal_part > 0.40 else math.floor(amount)
+    amount = math.ceil(amount) if decimal_part > 0.35 else math.floor(amount)
 
     return {
         "city_id": city.id,
-        "distance_km": distance_km,
+        "distance_km": transit_distance+collection_distance,
         "is_fast_delivery": fast_delivery,
         "amount": amount,
     }

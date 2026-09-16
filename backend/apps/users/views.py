@@ -48,17 +48,6 @@ logger = logging.getLogger(__name__)
 CUSTOMER_DEFAULT_PASSWORD = "Pass@123"
 
 
-def _to_decimal_3(value: float) -> Decimal:
-    return Decimal(str(value)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
-
-
-def _convert_to_cbd_relative_km(lat: float, lon: float, cbd_lat: float, cbd_lon: float):
-    """Convert latitude/longitude to local x/y kilometers relative to CBD."""
-    avg_lat = math.radians((lat + cbd_lat) / 2.0)
-    x_km = (lon - cbd_lon) * 111.320 * math.cos(avg_lat)
-    y_km = (lat - cbd_lat) * 110.574
-    return _to_decimal_3(x_km), _to_decimal_3(y_km)
-
 
 class CityViewSet(viewsets.ModelViewSet):
     queryset = City.objects.all()
@@ -67,7 +56,7 @@ class CityViewSet(viewsets.ModelViewSet):
 
 
 class SuburbViewSet(viewsets.ModelViewSet):
-    queryset = Suburb.objects.all()
+    queryset = Suburb.objects.filter(is_active=True)
     serializer_class = SuburbSerializer
     permission_classes = [AllowAny]
 
@@ -84,8 +73,6 @@ class ImportAreasView(APIView):
         },
     )
     def post(self, request):
-        city_name = str(request.data.get("city", "Harare")).strip() or "Harare"
-        cbd_area_name = str(request.data.get("cbd_area", "CBD")).strip() or "CBD"
 
         areas_path = Path(__file__).resolve().parents[2] / "areas.json"
         if not areas_path.exists():
@@ -108,35 +95,13 @@ class ImportAreasView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        cbd_record = next(
-            (
-                row
-                for row in areas
-                if str(row.get("Areas", "")).strip().lower() == cbd_area_name.lower()
-            ),
-            None,
-        )
-        if not cbd_record:
-            return Response(
-                {"error": f"CBD area '{cbd_area_name}' not found in areas.json"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        try:
-            cbd_lat = float(cbd_record["x"])
-            cbd_lon = float(cbd_record["y"])
-        except (TypeError, ValueError, KeyError):
-            return Response(
-                {"error": "CBD area has invalid coordinate values"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        city, _ = City.objects.get_or_create(name=city_name)
         created_count = 0
         updated_count = 0
         skipped_count = 0
 
         for row in areas:
+            city, _ = City.objects.get_or_create(name=int(row["city_id"]))
+
             area_name = str(row.get("Areas", "")).strip()
             if not area_name:
                 skipped_count += 1
@@ -149,10 +114,7 @@ class ImportAreasView(APIView):
                 skipped_count += 1
                 continue
 
-            x_pos, y_pos = _convert_to_cbd_relative_km(lat, lon, cbd_lat, cbd_lon)
             defaults = {
-                "x_pos": x_pos,
-                "y_pos": y_pos,
                 "x_coord": Decimal(str(lat)),
                 "y_coord": Decimal(str(lon)),
             }
@@ -170,7 +132,6 @@ class ImportAreasView(APIView):
             {
                 "message": "Areas imported successfully",
                 "city": city.name,
-                "cbd_area": cbd_area_name,
                 "created": created_count,
                 "updated": updated_count,
                 "skipped": skipped_count,
@@ -479,10 +440,6 @@ class CustomerRegisterLoginView(APIView):
         otp_code = data.get("otp_code")
         is_profile_complete = False
         username = normalize_zimbabwean_number(username)
-
-        print(
-            f"Received request with phone_number: {username} and otp_code: {otp_code}"
-        )  # Debugging line
 
         if not username or not otp_code:
             return Response(
