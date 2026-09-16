@@ -1,5 +1,6 @@
 from rest_framework.permissions import BasePermission
-from django.contrib.auth.models import User
+
+from .models import Staff
 
 
 class IsStaff(BasePermission):
@@ -7,4 +8,4 @@ class IsStaff(BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated or not request.user.is_active:
             return False
-        return User.objects.filter(id=request.user.id, staff__isnull=False).exists()
+        return Staff.objects.filter(user_id=request.user.id).exists()

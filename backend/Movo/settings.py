@@ -76,7 +76,7 @@ INSTALLED_APPS = [
     "apps.intracity.apps.IntracityConfig",
     "apps.bookkeeping.apps.BookkeepingConfig",
     "apps.transporters.apps.TransportersConfig",
-    "apps.admin.apps.AdminConfig",
+    "apps.adminportal.apps.AdminPortalConfig",
     "apps.health.apps.HealthConfig",
 ]
 
@@ -84,12 +84,12 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
 ]
 
 ASGI_APPLICATION = "Movo.asgi.application"
@@ -97,13 +97,21 @@ ASGI_APPLICATION = "Movo.asgi.application"
 CSRF_TRUSTED_ORIGINS = [
     "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
     "https://movo.co.zw",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
     "https://movo.co.zw",
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
+
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

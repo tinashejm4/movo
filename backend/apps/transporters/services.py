@@ -1,10 +1,13 @@
+import logging
+
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from apps.bookkeeping.models import Account, IntracitySale
 from apps.intracity.models import Invoice, Package, PackageStatus
-
+from logging import getLogger
+logger = getLogger(__name__)
 
 class CashConfirmationError(Exception):
     status_code = 400
@@ -104,6 +107,7 @@ def free_drivers_and_close_packages():
     This intentionally destructive helper is isolated for easy removal after
     driver-app testing.
     """
+    logger.log(logging.INFO, "Starting free_drivers_and_close_packages operation")
     latest_status = (
         PackageStatus.objects.filter(package=OuterRef("pk"))
         .order_by("-updated_at", "-pk")
@@ -149,9 +153,11 @@ def free_drivers_and_close_packages():
             ["biker", "assigned_at", "delivered_at"],
         )
 
-    return {
+    result = {
         "message": "Drivers freed and assigned packages closed",
         "freed_driver_assignments": len(packages),
         "delivered_packages": delivered_count,
         "cancelled_packages": cancelled_count,
     }
+    logger.log(logging.INFO, f"Finished free_drivers_and_close_packages operation: {result}")
+    return result

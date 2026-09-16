@@ -143,10 +143,6 @@ class TransporterView(ViewSet):
                 start_time=timezone.now(),
                 is_active=is_biker_activated,
             )
-        logger.log(
-            logging.INFO,
-            f"Biker {'activated' if is_biker_activated else 'deactivated'} on {timezone.localdate()}",
-        )
         if is_biker_activated:
             transaction.on_commit(assign_pending_packages_safely)
         return Response(

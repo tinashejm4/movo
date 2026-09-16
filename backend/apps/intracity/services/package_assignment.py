@@ -14,7 +14,6 @@ from ..models import Package, PackageStatus
 
 logger = logging.getLogger(__name__)
 
-
 def is_biker_busy(biker):
     """Return whether a biker has a package awaiting collection or in transit."""
     session = BikerDailySession.objects.filter(
@@ -34,82 +33,78 @@ def is_biker_busy(biker):
         .values("status")[:1]
     )
     return (
-        Package.objects.filter(biker=biker)
+        Package.objects.filter(biker=biker, added_at__date=timezone.localdate())
         .annotate(current_status=Subquery(latest_status))
         .filter(current_status__in=["Assigned", "In Transit"])
         .exists()
     )
 
-
+@transaction.atomic
 def assign_pending_packages():
     """Assign available bikers to today's pending packages.
 
     Biker rows are locked in a stable order so concurrent dispatch attempts
     cannot assign the same biker to multiple active packages.
     """
-    with transaction.atomic():
-        latest_status = (
-            PackageStatus.objects.filter(package=OuterRef("pk"))
-            .order_by("-updated_at", "-pk")
-            .values("status")[:1]
-        )
+    latest_status = (
+        PackageStatus.objects.filter(package=OuterRef("pk"))
+        .order_by("-updated_at", "-pk")
+        .values("status")[:1]
+    )
 
-        logger.info(latest_status)
+    # Lock all bikers first to serialize concurrent assignment runs.
+    bikers = list(
+        Biker.objects.select_for_update()
+        .select_related("user")
+        .order_by("id")
+    )
 
-        # Lock all bikers first to serialize concurrent assignment runs.
-        bikers = list(
-            Biker.objects.select_for_update()
-            .select_related("user")
-            .order_by("id")
-        )
+    pending_packages = list(
+        Package.objects.select_for_update()
+        .filter(added_at__date=timezone.localdate())
+        .annotate(status=Subquery(latest_status))
+        .filter(status="Pending")
+        .order_by("-is_fast_delivery", "added_at")
+    )
 
-        pending_packages = list(
-            Package.objects.select_for_update()
-            .filter(added_at__date=timezone.localdate())
-            .annotate(status=Subquery(latest_status))
-            .filter(status="Pending")
-            .order_by("-is_fast_delivery", "added_at")
-        )
+    if not pending_packages:
+        logger.warning("assign_pending_packages: no pending packages found")
+        return _result("No pending packages available for assignment")
 
-        if not pending_packages:
-            logger.info("assign_pending_packages: no pending packages found")
-            return _result("No pending packages available for assignment")
+    free_bikers = [biker for biker in bikers if not is_biker_busy(biker)]
 
-        free_bikers = [biker for biker in bikers if not is_biker_busy(biker)]
-
-        if not free_bikers:
-            logger.info("assign_pending_packages: no available bikers")
-            return _result(
-                "No available bikers for assignment",
-                unassigned_count=len(pending_packages),
-            )
-
-        assigned_packages = []
-        assigned_at = timezone.now()
-        for package, biker in zip(pending_packages, free_bikers):
-            package.biker = biker
-            package.assigned_at = assigned_at
-            package.save(update_fields=["biker", "assigned_at"])
-            PackageStatus.objects.create(package=package, status="Assigned")
-            queue_package_assignment_notifications(package=package, biker=biker)
-            assigned_packages.append(_assignment_payload(package, biker))
-
-        unassigned_count = max(
-            len(pending_packages) - len(assigned_packages),
-            0,
-        )
-        transaction.on_commit(
-            lambda payloads=tuple(assigned_packages): _publish_assignments(
-                payloads
-            )
-        )
-
+    if not free_bikers:
+        logger.warning("assign_pending_packages: no available bikers")
         return _result(
-            "Pending packages assigned successfully",
-            assigned_packages=assigned_packages,
-            unassigned_count=unassigned_count,
+            "No available bikers for assignment",
+            unassigned_count=len(pending_packages),
         )
 
+    assigned_packages = []
+    assigned_at = timezone.now()
+    for package, biker in zip(pending_packages, free_bikers):
+        package.biker = biker
+        package.assigned_at = assigned_at
+        package.save(update_fields=["biker", "assigned_at"])
+        PackageStatus.objects.create(package=package, status="Assigned")
+        queue_package_assignment_notifications(package=package, biker=biker)
+        assigned_packages.append(_assignment_payload(package, biker))
+
+    unassigned_count = max(
+        len(pending_packages) - len(assigned_packages),
+        0,
+    )
+    transaction.on_commit(
+        lambda payloads=tuple(assigned_packages): _publish_assignments(
+            payloads
+        )
+    )
+
+    return _result(
+        "Pending packages assigned successfully",
+        assigned_packages=assigned_packages,
+        unassigned_count=unassigned_count,
+    )
 
 def assign_pending_packages_safely():
     """Run automatic dispatch without breaking the package-creation response."""
