@@ -16,6 +16,8 @@ Including another URLconf
 """
 
 from django.contrib import admin
+from django.conf import settings
+from django.conf.urls.static import static
 from django.urls import path, include
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -30,7 +32,7 @@ def health(request):
 
 def get_server_version(request):
     # You can replace this with your actual server version retrieval logic
-    server_version = "1.0.23"  # Example version
+    server_version = "1.0.24"  # Example version
     date = "08-09-2026"  # Example date
     change_log = [
         "Added version endpoint to retrieve server version and date.",
@@ -71,3 +73,5 @@ urlpatterns = [
     path("", include(third_party_urlpatterns)),
     path("", include(app_urlpatterns)),
 ]
+
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
