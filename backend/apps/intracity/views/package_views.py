@@ -1,10 +1,12 @@
+from django.utils import timezone
+
 from django.db.models import OuterRef, Q, Subquery
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
-from apps.users.models import ProfileImage, Suburb
+from apps.users.models import Customer, ProfileImage, Suburb
 from apps.users.views import request_otp
 from ..serializers.package_serializers import (
     CurrentPackageStatusSerializer,
@@ -416,9 +418,12 @@ class PackageViewSet(ViewSet):
         status_map = {}
         for status_record in status_records:
             status_map.setdefault(status_record.status, status_record.updated_at)
+            logger.warning("Status: %s, Updated At: %s", status_record.status, status_record.updated_at)
 
         delivered_at = package.delivered_at or status_map.get("Delivered")
         collected_at = status_map.get("In Transit")
+        cancelled_at = status_map.get("Cancelled")
+        assigned_at = status_map.get("Assigned")
 
         serializer = PackageListRequestSerializer(
             {
@@ -428,6 +433,7 @@ class PackageViewSet(ViewSet):
                 "dropoff_address": package.dropoff_address,
                 "collected_at": collected_at,
                 "delivered_at": delivered_at,
+                "assigned_at": assigned_at,
                 "slug": package.slug,
                 "is_incoming": package_is_incoming_for_user(
                     package, requester_user_id
@@ -658,3 +664,61 @@ class PackageViewSet(ViewSet):
             )
 
         return Response({"suburbs": suburbs}, status=status.HTTP_200_OK)
+
+
+    @extend_schema(
+        tags=["intracity/Packages"],
+        request=None,
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                description=(
+                    "Returns the current packages placed today for the authenticated user, "
+                ),
+                required=False,
+                type=str,
+            ),
+        ],
+        responses={
+            200: PackageListSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="Incorrect request parameters"
+            ),
+        },
+    )
+    def current_packages(self, request):
+        user = request.user
+        if not user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        customer = Customer.objects.filter(user=user).first()
+        if not customer:
+            return Response(
+                {"error": "Customer profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        current_packages = Package.objects.filter(Q(sender=customer) | Q(receiver=customer), 
+                                             added_at__date = timezone.localdate())
+
+        page_packages = list(current_packages)
+        package_ids = [package.id for package in page_packages]
+        status_records_by_package_id = {}
+        for status_record in PackageStatus.objects.filter(
+            package_id__in=package_ids
+        ).order_by("updated_at"):
+            status_records_by_package_id.setdefault(
+                status_record.package_id, []
+            ).append(status_record)
+
+        response_data = [
+            self.build_package_list_payload(
+                package=package,
+                requester_user_id=request.user.id,
+                status_records=status_records_by_package_id.get(package.id, []),
+            )
+            for package in current_packages
+        ]
+
+        return Response({"packages": response_data}, status=status.HTTP_200_OK)
