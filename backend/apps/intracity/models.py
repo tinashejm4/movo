@@ -55,8 +55,6 @@ class Package(models.Model):
             self.slug = self.generate_unique_slug()
         super().save(*args, **kwargs)
 
-
-
 class PackageStatus(models.Model):
     status_choices = [
         ("Pending", "Pending"),
@@ -72,7 +70,7 @@ class PackageStatus(models.Model):
     updated_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.status} - {self.package}"
+        return f"{self.status} - {self.package.pk}"
 
 
 class Invoice(models.Model):
