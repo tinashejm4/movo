@@ -1,12 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 import math
 from django.utils import timezone
-
 from django.contrib.auth.models import User
 from django.db import models
-from logging import getLogger
 
-logger = getLogger(__name__)
 
 class Branch(models.Model):
     name = models.CharField(max_length=100)
@@ -15,7 +12,7 @@ class Branch(models.Model):
     
     def __str__(self):
         return f'{self.name}'
-    
+
 # ______________________________________________________________________________________
 
 class Staff(models.Model):
@@ -25,7 +22,7 @@ class Staff(models.Model):
     date_joined = models.DateField(auto_now_add=True)
 
     def __str__(self):
-        return f'{self.user.first_name} {self.user.last_name}'
+        return f'{self.user.first_name} {self.user.last_name} - {self.position}'
 
 class Customer(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
@@ -37,6 +34,7 @@ class Customer(models.Model):
 class Biker(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     date_joined = models.DateField(auto_now_add=True)
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, null=True, blank=True)
 
     def __str__(self):
         return f'{self.user.first_name} {self.user.last_name}'
@@ -47,12 +45,6 @@ class Contact(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     phone_number = models.CharField(max_length=50)
     phone_number2 = models.CharField(max_length=50, null = True, blank = True)
-
-    def __str__(self):
-        return f'{self.user.first_name} {self.user.last_name}'
-
-class Address(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
     address = models.CharField(max_length=150, null = True, blank = True)
 
     def __str__(self):
@@ -66,6 +58,23 @@ class Identification(models.Model):
     def __str__(self):
         return f'{self.user.first_name} {self.user.last_name}'
 
+class NextOfKin(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    phone_number = models.CharField(max_length=50)
+    relationship = models.CharField(max_length=50)
+
+    def __str__(self):
+        return f'{self.name} ({self.relationship}) - {self.user.first_name} {self.user.last_name}'
+
+class Licence(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    licence_number = models.CharField(max_length=50)
+    licence_image  = models.ImageField(default = 'licence_images/licence_image.png', upload_to='licence_images')
+
+    def __str__(self):
+        return f'{self.user.first_name} {self.user.last_name}'
+
 class ProfileImage(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     profile_image  = models.ImageField(default = 'profile_pics/profile_default.png', upload_to='profile_pics')
@@ -73,6 +82,7 @@ class ProfileImage(models.Model):
     def __str__(self):
         return f'{self.user.first_name} {self.user.last_name}'
 
+# ______________________________________________________________________________________
 
 class OTP(models.Model):
     username = models.CharField(max_length=150)
@@ -88,6 +98,7 @@ class OTP(models.Model):
     def __str__(self):
         return f'{self.username} - {self.otp_code}'
 
+# ______________________________________________________________________________________
 
 class Suburb(models.Model):
     DISTANCE_CORRECTION_REFERENCE_KM = 10.0
@@ -127,6 +138,18 @@ class Suburb(models.Model):
 
         return distance_km
 
+class SuburbAlias(models.Model):
+    suburb = models.ForeignKey('Suburb', on_delete=models.CASCADE, related_name='aliases')
+    alias = models.CharField(max_length=100)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['suburb', 'alias'], name='uniq_suburb_alias_per_suburb')
+        ]
+
+    def __str__(self):
+        return f'{self.alias} ({self.suburb.name})'
+
 class City(models.Model):
     name = models.CharField(max_length=100)
     province = models.CharField(max_length=100, default='Harare')
@@ -135,4 +158,4 @@ class City(models.Model):
     def __str__(self):
         return f'{self.name}, {self.province}, {self.country}'
 
-
+# ______________________________________________________________________________________

@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (OTP, Staff, Branch, Customer, Contact, 
-Identification, ProfileImage, City, Suburb, Biker)
+Identification, ProfileImage, City, Suburb, Biker, SuburbAlias,
+NextOfKin, Licence )
 
 admin.site.register(Staff)
 admin.site.register(Branch)
@@ -13,3 +14,6 @@ admin.site.register(ProfileImage)
 admin.site.register(OTP)
 admin.site.register(Suburb)
 admin.site.register(Biker)
+admin.site.register(SuburbAlias)
+admin.site.register(NextOfKin)
+admin.site.register(Licence)

@@ -302,28 +302,20 @@ else:
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-if os.environ.get("DB_HOST"):
-    db_sslmode = os.environ.get("DB_SSLMODE")
-    db_options = {"sslmode": db_sslmode} if db_sslmode else {}
+db_sslmode = os.environ.get("DB_SSLMODE")
+db_options = {"sslmode": db_sslmode} if db_sslmode else {}
 
-    DATABASES = {
-        "default": {
-            "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
-            "NAME": os.environ.get("DB_NAME", "movo_db"),
-            "USER": os.environ.get("DB_USER", "movo_user"),
-            "PASSWORD": os.environ.get("DB_PASSWORD", "movo_password"),
-            "HOST": os.environ.get("DB_HOST", "db"),
-            "PORT": os.environ.get("DB_PORT", "5432"),
-            "OPTIONS": db_options,
-        }
+DATABASES = {
+    "default": {
+        "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
+        "NAME": os.environ.get("DB_NAME", "movo_db"),
+        "USER": os.environ.get("DB_USER", "movo_user"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", "movo_password"),
+        "HOST": os.environ.get("DB_HOST", "db"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+        "OPTIONS": db_options,
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+}
 
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

@@ -110,6 +110,7 @@ class Price(models.Model):
     fast_delivery_multiplier = models.DecimalField(
         max_digits=5, decimal_places=2, default=1.5
     )
+    is_locked = models.BooleanField(default=False) #system cannot override this price once locked
 
     def __str__(self):
         return f"Price for {self.city.name} - Base: {self.base_price}, Rate per KM: {self.rate_per_km}, Fast Delivery Multiplier: {self.fast_delivery_multiplier}"

@@ -32,7 +32,7 @@ from apps.users.serializers import (
     LogoutResponseSerializer,
     DriverProfileResponseSerializer,
 )
-from .models import OTP, Biker, City, Contact, Customer, ProfileImage, Staff, Suburb
+from .models import OTP, Biker, Branch, City, Contact, Customer, ProfileImage, Staff, Suburb
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.exceptions import TokenError
@@ -59,86 +59,6 @@ class SuburbViewSet(viewsets.ModelViewSet):
     queryset = Suburb.objects.filter(is_active=True)
     serializer_class = SuburbSerializer
     permission_classes = [AllowAny]
-
-
-class ImportAreasView(APIView):
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        tags=["Users"],
-        responses={
-            200: OpenApiResponse(description="Areas imported successfully"),
-            400: OpenApiResponse(description="Invalid data in areas.json"),
-            404: OpenApiResponse(description="areas.json or CBD area not found"),
-        },
-    )
-    def post(self, request):
-
-        areas_path = Path(__file__).resolve().parents[2] / "areas.json"
-        if not areas_path.exists():
-            return Response(
-                {"error": f"areas.json not found at {areas_path}"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        try:
-            areas = json.loads(areas_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return Response(
-                {"error": "areas.json is not valid JSON"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not isinstance(areas, list):
-            return Response(
-                {"error": "areas.json must contain a JSON array"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        created_count = 0
-        updated_count = 0
-        skipped_count = 0
-
-        for row in areas:
-            city, _ = City.objects.get_or_create(name=int(row["city_id"]))
-
-            area_name = str(row.get("Areas", "")).strip()
-            if not area_name:
-                skipped_count += 1
-                continue
-
-            try:
-                lat = float(row["x"])
-                lon = float(row["y"])
-            except (TypeError, ValueError, KeyError):
-                skipped_count += 1
-                continue
-
-            defaults = {
-                "x_coord": Decimal(str(lat)),
-                "y_coord": Decimal(str(lon)),
-            }
-            _, created = Suburb.objects.update_or_create(
-                city=city,
-                name=area_name,
-                defaults=defaults,
-            )
-            if created:
-                created_count += 1
-            else:
-                updated_count += 1
-
-        return Response(
-            {
-                "message": "Areas imported successfully",
-                "city": city.name,
-                "created": created_count,
-                "updated": updated_count,
-                "skipped": skipped_count,
-                "total": len(areas),
-            },
-            status=status.HTTP_200_OK,
-        )
 
 
 class StaffProfileView(APIView):
@@ -700,5 +620,26 @@ class DriverProfileView(APIView):
                 "profile_image": profile_image.profile_image.url,
                 "joined_on": biker.date_joined,
             },
+            status=status.HTTP_200_OK,
+        )
+
+
+class BranchListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+
+    def get(self, request):
+        branches = Branch.objects.all()
+        branch_list = []
+        for branch in branches:
+            branch_list.append(
+                {
+                    "branch_id": branch.id,
+                    "name": branch.name,
+                    "address": branch.address,
+                }
+            )
+        return Response(
+            branch_list,
             status=status.HTTP_200_OK,
         )

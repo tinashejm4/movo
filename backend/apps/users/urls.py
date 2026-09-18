@@ -8,10 +8,10 @@ from .views import (
     LogoutView,
     TokenRefreshView,
     CustomerRegisterLoginView,
-    ImportAreasView,
     CityViewSet,SuburbViewSet,
     DriverLoginView,
     DriverProfileView,
+    BranchListView,
 )
 
 router = DefaultRouter()
@@ -38,5 +38,5 @@ urlpatterns = [
     path("driver/refresh/", TokenRefreshView.as_view(), name="driver_token_refresh"),
     path("driver/logout/", LogoutView.as_view(), name="driver_token_logout"),
     path("driver/profile/", DriverProfileView.as_view(), name="driver_profile"),
-    path("suburbs/import-areas/", ImportAreasView.as_view(), name="import_areas"),
+    path("branches/", BranchListView.as_view(), name="branch_list"),
 ] + router.urls
