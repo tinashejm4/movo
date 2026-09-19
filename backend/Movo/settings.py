@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "channels",
     "corsheaders",
+    "storages",
     #! Local apps
     "apps.notifications.apps.NotificationsConfig",
     "apps.users.apps.UsersConfig",
@@ -354,6 +355,31 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
+
+if not DEBUG:
+    DEFAULT_FILE_STORAGE = "storages.backends.azure_storage.AzureStorage"
+    AZURE_ACCOUNT_NAME = os.environ.get("AZURE_ACCOUNT_NAME")
+    AZURE_ACCOUNT_KEY = os.environ.get("AZURE_ACCOUNT_KEY")
+    AZURE_CONTAINER = os.environ.get("AZURE_CONTAINER")
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "Movo.storage_backends.AzureMediaStorage",
+            "OPTIONS": {
+                "account_name": AZURE_ACCOUNT_NAME,
+                "account_key": AZURE_ACCOUNT_KEY,
+                "azure_container": AZURE_CONTAINER,
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+    MEDIA_URL = (
+        f"https://{AZURE_ACCOUNT_NAME}.blob.core.windows.net/{AZURE_CONTAINER}/"
+    )
+
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATIC_URL = "/static/"

@@ -7,6 +7,8 @@ from apps.users.permissions import IsStaff
 from apps.users.models import Biker, Contact, NextOfKin, ProfileImage, Identification, Licence, Branch
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
+from django.db import transaction
+
 
 class BikersListView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
@@ -57,9 +59,11 @@ class BikerDetailView(APIView):
         }
         return Response(data, status=status.HTTP_200_OK)
 
+
 class BikerCreateView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
 
+    @transaction.atomic
     def post(self, request):
         first_name = request.data.get("first_name")
         last_name = request.data.get("last_name")
@@ -121,13 +125,13 @@ class BikerCreateView(APIView):
         Biker.objects.create(
             user=biker_user,
             branch=branch,
-            currency = "USD",
         )
 
         Account.objects.create(
             name=f"{first_name} {last_name}'s Cash Account",
             branch=branch,
             owner=biker_user,
+            currency = "USD",
             description = f"Daily Cash Account for {first_name} {last_name}"
         )
 
