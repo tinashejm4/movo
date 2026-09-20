@@ -429,6 +429,13 @@ class PackageViewSet(ViewSet):
             {
                 "package_id": package.id,
                 "initiator_id": package_initiator_user_id(package),
+                "confirmation_code": package_confirmation_code_for_user(
+                    package,
+                    requester_user_id,
+                    current_status=(
+                        status_records[-1].status if status_records else "Pending"
+                    ),
+                ),
                 "pickup_address": package.pickup_address,
                 "dropoff_address": package.dropoff_address,
                 "collected_at": collected_at,
@@ -460,6 +467,14 @@ class PackageViewSet(ViewSet):
         cancelled_at = status_map.get("Cancelled")
         current_status = (
             status_records[-1].status if status_records else "Pending"
+        )
+        cancellation_status = next(
+            (
+                status_record
+                for status_record in reversed(status_records)
+                if status_record.status == "Cancelled"
+            ),
+            None,
         )
         driver_profile_picture = None
         if package.biker:
@@ -514,6 +529,11 @@ class PackageViewSet(ViewSet):
                 "collected_at": collected_at,
                 "is_cancelled": cancelled_at is not None,
                 "cancelled_at": cancelled_at,
+                "cancellation_reason": (
+                    cancellation_status.comments
+                    if current_status == "Cancelled" and cancellation_status
+                    else None
+                ),
                 "can_cancel": can_cancel_package(
                     invoice=invoice,
                     current_status=current_status,
@@ -699,8 +719,20 @@ class PackageViewSet(ViewSet):
                 {"error": "Customer profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        current_packages = Package.objects.filter(Q(sender=customer) | Q(receiver=customer), 
-                                             added_at__date = timezone.localdate())
+        latest_status = (
+            PackageStatus.objects.filter(package=OuterRef("pk"))
+            .order_by("-updated_at", "-pk")
+            .values("status")[:1]
+        )
+        current_packages = (
+            Package.objects.select_related("sender__user", "receiver__user")
+            .filter(
+                Q(sender=customer) | Q(receiver=customer),
+                added_at__date=timezone.localdate(),
+            )
+            .annotate(current_status=Subquery(latest_status))
+            .exclude(current_status="Cancelled")
+        )
 
         page_packages = list(current_packages)
         package_ids = [package.id for package in page_packages]

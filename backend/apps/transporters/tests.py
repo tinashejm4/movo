@@ -813,3 +813,20 @@ class TransporterPackageDetailEndpointTests(APITestCase):
         response = self.client.get(self.url, {"id": self.package.id})
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cancelled_package_detail_includes_cancellation_reason(self):
+        PackageStatus.objects.create(
+            package=self.package,
+            status="Cancelled",
+            comments="Customer cancelled the order",
+        )
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.get(self.url, {"id": self.package.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["current_status"], "cancelled")
+        self.assertEqual(
+            response.data["cancellation_reason"],
+            "Customer cancelled the order",
+        )

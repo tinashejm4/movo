@@ -157,5 +157,6 @@ class TransporterPackageDetailSerializer(serializers.Serializer):
         choices=[package_status.value for package_status in DriverPackageStatus],
         allow_null=True,
     )
+    cancellation_reason = serializers.CharField(allow_null=True, allow_blank=True)
     invoice_id = serializers.IntegerField(allow_null=True)
     status_history = PackageStatusDetailSerializer(many=True)

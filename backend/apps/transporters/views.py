@@ -566,6 +566,14 @@ class TransporterView(ViewSet):
         status_history = list(
             PackageStatus.objects.filter(package=package).order_by("-updated_at", "-pk")
         )
+        cancellation_status = next(
+            (
+                status_record
+                for status_record in status_history
+                if status_record.status == "Cancelled"
+            ),
+            None,
+        )
         contacts = {
             contact.user_id: contact.phone_number
             for contact in Contact.objects.filter(
@@ -593,6 +601,11 @@ class TransporterView(ViewSet):
             "delivered_at": package.delivered_at,
             "added_at": package.added_at,
             "current_status": DRIVER_PACKAGE_STATUS_BY_VALUE.get(package.latest_status),
+            "cancellation_reason": (
+                cancellation_status.comments
+                if package.latest_status == "Cancelled" and cancellation_status
+                else None
+            ),
             "invoice_id": invoice.id if invoice else None,
             "status_history": [
                 {
