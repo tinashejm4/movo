@@ -27,6 +27,36 @@ def invoice_user_is_payer(invoice, user_id):
         return False
 
 
+def invoice_user_is_assigned_biker(invoice, user_id):
+    """Whether this user is the biker currently assigned to the invoice package."""
+    if invoice is None or user_id is None:
+        return False
+
+    try:
+        return (
+            invoice.package.biker is not None
+            and invoice.package.biker.user_id == user_id
+        )
+    except (AttributeError, TypeError):
+        return False
+
+
+def invoice_user_can_start_payment(invoice, user_id):
+    """Allow the payer or assigned biker to initiate a payment request."""
+    if not (
+        invoice_user_is_payer(invoice, user_id)
+        or invoice_user_is_assigned_biker(invoice, user_id)
+    ):
+        return False
+    if invoice.is_paid or package_is_cancelled(invoice.package):
+        return False
+
+    try:
+        return Decimal(invoice.amount) > 0
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+
 def invoice_has_pending_payment(invoice):
     if invoice is None:
         return False

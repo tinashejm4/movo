@@ -14,7 +14,12 @@ from rest_framework.viewsets import ViewSet
 from django.urls import reverse
 from ..models import Invoice, EcocashPayment, PaynowPayment
 from apps.bookkeeping.models import IntracitySale, Account
-from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
+from ..services.invoice_payment import (
+    invoice_user_can_pay,
+    invoice_user_can_start_payment,
+    invoice_user_is_assigned_biker,
+    invoice_user_is_payer,
+)
 from apps.users.models import Customer
 from drf_spectacular.utils import OpenApiResponse, extend_schema, OpenApiParameter
 from ..serializers.payment_serializer import (
@@ -100,9 +105,16 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invoice = Invoice.objects.select_for_update().select_related(
-            "package__sender__user", "package__receiver__user"
-        ).filter(id=invoice_id).first()
+        invoice = (
+            Invoice.objects.select_for_update(of=("self",))
+            .select_related(
+                "package__sender__user",
+                "package__receiver__user",
+                "package__biker__user",
+            )
+            .filter(id=invoice_id)
+            .first()
+        )
 
         if not invoice:
             return Response(
@@ -114,9 +126,17 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not invoice_user_is_payer(invoice, request.user.id):
+        if not (
+            invoice_user_is_payer(invoice, request.user.id)
+            or invoice_user_is_assigned_biker(invoice, request.user.id)
+        ):
             return Response(
-                {"error": "Only the customer responsible for this invoice can pay it"},
+                {
+                    "error": (
+                        "Only the customer responsible for this invoice or its "
+                        "assigned biker can start payment"
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -130,7 +150,7 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not invoice_user_can_pay(invoice, request.user.id):
+        if not invoice_user_can_start_payment(invoice, request.user.id):
             return Response(
                 PaymentErrorResponseSerializer(
                     {"error": "Payment cannot be started for this invoice"}
@@ -158,7 +178,13 @@ class PaymentViewSet(ViewSet):
 
         if response.success:
             PaynowPayment.objects.create(
-                customer=Customer.objects.get(user=request.user),
+                # A biker may initiate the request on the customer's behalf;
+                # the attempt remains owned by the invoice payer.
+                customer=(
+                    invoice.package.receiver
+                    if invoice.is_pay_forward
+                    else invoice.package.sender
+                ),
                 invoice=invoice,
                 phone_number=phone_number,
                 reference=ref,
@@ -213,7 +239,11 @@ class PaymentViewSet(ViewSet):
     @transaction.atomic
     def paynow_notify(self, request):
         invoice_id = request.query_params.get("invoice_id")
-        invoice = Invoice.objects.filter(id=invoice_id).first()
+        # This endpoint changes both the invoice and its one-to-one ledger row.
+        # Locking the invoice makes concurrent poll requests serialize: once the
+        # first request commits, later requests see the paid invoice and return
+        # without attempting to create another sale.
+        invoice = Invoice.objects.select_for_update().filter(id=invoice_id).first()
 
         if not invoice:
             return Response(
@@ -259,10 +289,12 @@ class PaymentViewSet(ViewSet):
             invoice.paid_at = timezone.now()
             invoice.save(update_fields=["is_paid", "paid_at"])
 
-            IntracitySale.objects.create(
-                account=Account.objects.get(name = "FBC", currency = "USD"),
+            IntracitySale.objects.get_or_create(
                 invoice=invoice,
-                amount=invoice.amount,
+                defaults={
+                    "account": Account.objects.get(name="FBC", currency="USD"),
+                    "amount": invoice.amount,
+                },
             )
 
             return Response(
