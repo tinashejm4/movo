@@ -171,6 +171,35 @@ class IntracityPackageListTests(APITestCase):
 
         self.assertTrue(response.data["results"][0]["is_incoming"])
 
+    def test_current_packages_excludes_cancelled_packages_and_includes_confirmation_code(self):
+        active_package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="111111",
+            receiver_code="222222",
+        )
+        cancelled_package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Belgravia",
+            dropoff_address="Marlborough",
+            sender_code="333333",
+            receiver_code="444444",
+        )
+        PackageStatus.objects.create(package=active_package, status="Pending")
+        PackageStatus.objects.create(package=cancelled_package, status="Cancelled")
+
+        response = self.client.get(reverse("intracity_current_packages"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["packages"]), 1)
+        self.assertEqual(response.data["packages"][0]["package_id"], active_package.id)
+        self.assertEqual(response.data["packages"][0]["confirmation_code"], "111111")
+
     def test_package_status_includes_assigned_driver_number(self):
         package = Package.objects.create(
             sender=self.sender,
@@ -313,6 +342,34 @@ class IntracityPackageListTests(APITestCase):
         self.assertEqual(response.data["confirmation_code"], "654321")
         self.assertNotIn("sender_code", response.data)
         self.assertNotIn("receiver_code", response.data)
+
+    def test_cancelled_package_detail_includes_cancellation_reason(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="123456",
+            receiver_code="654321",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+        PackageStatus.objects.create(
+            package=package,
+            status="Cancelled",
+            comments="Receiver requested a cancellation",
+        )
+
+        response = self.client.get(
+            reverse("intracity_package_detail"),
+            {"package_id": package.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["cancellation_reason"],
+            "Receiver requested a cancellation",
+        )
 
 
 class IntracityPaidPackageCancellationTests(APITestCase):

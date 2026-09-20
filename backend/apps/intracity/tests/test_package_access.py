@@ -9,6 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.users.models import Biker, City, Customer
+from apps.bookkeeping.models import Account, IntracitySale
 
 from ..models import (
     EcocashPayment,
@@ -24,7 +25,11 @@ from ..services.package_access import (
     package_payer_user_id,
     package_user_can_cancel,
 )
-from ..services.invoice_payment import invoice_user_can_pay, invoice_user_is_payer
+from ..services.invoice_payment import (
+    invoice_user_can_pay,
+    invoice_user_can_start_payment,
+    invoice_user_is_payer,
+)
 
 
 class PackageAccessServiceTests(APITestCase):
@@ -403,6 +408,66 @@ class PackagePaymentAccessTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @patch("apps.intracity.views.payments_views.paynow.send_mobile")
+    def test_assigned_biker_can_start_paynow_payment_for_invoice_payer(self, send_mobile):
+        self.package.biker = self.biker
+        self.package.save(update_fields=["biker"])
+        send_mobile.return_value = SimpleNamespace(
+            success=True,
+            poll_url="https://example.com/paynow/poll/assigned-biker",
+        )
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.post(
+            reverse("intracity_paynow_payment"),
+            {"invoice_id": self.invoice.id, "phone_number": "0771234567"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        attempt = PaynowPayment.objects.get(invoice=self.invoice)
+        self.assertEqual(attempt.customer, self.sender)
+        self.assertTrue(invoice_user_can_start_payment(self.invoice, self.biker_user.id))
+
+    def test_unassigned_biker_cannot_start_paynow_payment(self):
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.post(
+            reverse("intracity_paynow_payment"),
+            {"invoice_id": self.invoice.id, "phone_number": "0771234567"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(invoice_user_can_start_payment(self.invoice, self.biker_user.id))
+
+    @patch("apps.intracity.views.payments_views.paynow.check_transaction_status")
+    def test_paynow_notify_is_idempotent_after_payment_is_recorded(self, check_status):
+        """A retry after a successful poll must not create another ledger sale."""
+        Account.objects.create(name="FBC", currency="USD")
+        PaynowPayment.objects.create(
+            customer=self.sender,
+            invoice=self.invoice,
+            phone_number="263771234567",
+            reference="REF-NOTIFY-IDEMPOTENT",
+            poll_url="https://example.com/paynow/poll/idempotent",
+        )
+        check_status.return_value = SimpleNamespace(status="paid")
+        self.client.force_authenticate(user=self.sender_user)
+
+        first_response = self.client.get(
+            reverse("intracity_paynow_notify"), {"invoice_id": self.invoice.id}
+        )
+        second_response = self.client.get(
+            reverse("intracity_paynow_notify"), {"invoice_id": self.invoice.id}
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(first_response.data["is_paid"])
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.data["message"], "Invoice is already paid")
+        self.assertEqual(IntracitySale.objects.filter(invoice=self.invoice).count(), 1)
 
     def test_initiator_cannot_start_forwarded_ecocash_payment(self):
         self.invoice.is_pay_forward = True
