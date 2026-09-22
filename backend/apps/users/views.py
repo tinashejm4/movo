@@ -8,7 +8,7 @@ from pathlib import Path
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, OpenApiTypes, extend_schema
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -56,9 +56,30 @@ class CityViewSet(viewsets.ModelViewSet):
 
 
 class SuburbViewSet(viewsets.ModelViewSet):
-    queryset = Suburb.objects.filter(is_active=True)
     serializer_class = SuburbSerializer
     permission_classes = [AllowAny]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Case-insensitive partial suburb-name search.",
+            )
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    def get_queryset(self):
+        queryset = Suburb.objects.filter(is_active=True).select_related("city")
+        search = self.request.query_params.get("search", "").strip()
+
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+
+        return queryset
 
 
 class ImportAreasView(APIView):

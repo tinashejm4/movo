@@ -7,7 +7,32 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Biker, Contact, Customer, OTP, ProfileImage
+from .models import Biker, City, Contact, Customer, OTP, ProfileImage, Suburb
+
+
+class SuburbViewSetTests(APITestCase):
+    def setUp(self):
+        self.city = City.objects.create(
+            name="Harare", province="Harare", country="Zimbabwe"
+        )
+        Suburb.objects.create(city=self.city, name="Avondale", is_active=True)
+        Suburb.objects.create(city=self.city, name="Borrowdale", is_active=True)
+        Suburb.objects.create(city=self.city, name="Avondale West", is_active=False)
+
+    def test_search_filters_active_suburbs_by_name_case_insensitively(self):
+        response = self.client.get(reverse("suburb-list"), {"search": "AVON"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([suburb["name"] for suburb in response.data], ["Avondale"])
+
+    def test_empty_search_preserves_the_active_suburbs_list(self):
+        response = self.client.get(reverse("suburb-list"), {"search": "  "})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [suburb["name"] for suburb in response.data],
+            ["Avondale", "Borrowdale"],
+        )
 
 
 class CustomerOtpAuthTests(APITestCase):
