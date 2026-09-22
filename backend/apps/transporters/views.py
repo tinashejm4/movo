@@ -15,6 +15,9 @@ from apps.intracity.services.package_assignment import (
     assign_pending_packages,
     assign_pending_packages_safely,
 )
+from apps.intracity.services.current_package_updates import (
+    notify_current_packages_changed,
+)
 from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from apps.users.models import Contact, ProfileImage
 from apps.notifications.services import queue_package_customer_notification
@@ -203,6 +206,7 @@ class TransporterView(ViewSet):
             comments=reason,
             updated_at=timezone.now(),
         )
+        notify_current_packages_changed(package=package, reason="cancelled")
         queue_package_customer_notification(
             package=package,
             event_type="package.cancelled",
@@ -292,6 +296,7 @@ class TransporterView(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         PackageStatus.objects.create(package=package, status="In Transit")
+        notify_current_packages_changed(package=package, reason="picked_up")
         queue_package_customer_notification(
             package=package,
             event_type="package.picked_up",
@@ -388,6 +393,7 @@ class TransporterView(ViewSet):
         PackageStatus.objects.create(package=package, status="Delivered")
         package.delivered_at = timezone.now()
         package.save(update_fields=["delivered_at"])
+        notify_current_packages_changed(package=package, reason="delivered")
         queue_package_customer_notification(
             package=package,
             event_type="package.delivered",

@@ -14,6 +14,7 @@ from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.package_assignment import assign_pending_packages
 from ..services.package_cancellation import can_cancel_package
 from ..services.package_access import package_user_can_cancel
+from ..services.current_package_updates import notify_current_packages_changed
 import logging
 from ..serializers.delivery_serializers import (
     AssignPendingPackagesResponseSerializer,
@@ -107,6 +108,7 @@ class DeliveryViewSet(ViewSet):
             )
 
         PackageStatus.objects.create(package=package, status="Cancelled", comments=reason)
+        notify_current_packages_changed(package=package, reason="cancelled")
         queue_package_customer_notification(
             package=package,
             event_type="package.cancelled",

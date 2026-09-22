@@ -26,14 +26,14 @@ class AutomaticPackageAssignmentTests(APITestCase):
         self.pickup_area = Suburb.objects.create(
             city=self.city,
             name="Avondale",
-            x_pos=0,
-            y_pos=0,
+            x_coord=0,
+            y_coord=0,
         )
         self.dropoff_area = Suburb.objects.create(
             city=self.city,
             name="Borrowdale",
-            x_pos=1,
-            y_pos=1,
+            x_coord=1,
+            y_coord=1,
         )
         self.sender_user = User.objects.create_user(
             username="263771000001",
@@ -43,6 +43,14 @@ class AutomaticPackageAssignmentTests(APITestCase):
         self.sender = Customer.objects.create(user=self.sender_user)
         self.client.force_authenticate(user=self.sender_user)
 
+    @patch(
+        "apps.intracity.services.package_assignment."
+        "notify_current_packages_changed"
+    )
+    @patch(
+        "apps.intracity.services.create_package."
+        "notify_current_packages_changed"
+    )
     @patch(
         "apps.intracity.services.package_assignment._publish_assignments"
     )
@@ -58,6 +66,8 @@ class AutomaticPackageAssignmentTests(APITestCase):
         automatic_assignment,
         _send_sms,
         publish_assignments,
+        create_update,
+        assignment_update,
     ):
         biker_user = User.objects.create_user(
             username="771000009",
@@ -101,6 +111,11 @@ class AutomaticPackageAssignmentTests(APITestCase):
         payloads = publish_assignments.call_args.args[0]
         self.assertEqual(payloads[0]["package_id"], package.id)
         self.assertEqual(payloads[0]["biker_id"], biker.id)
+        create_update.assert_called_once_with(package=package, reason="created")
+        assignment_update.assert_called_once_with(
+            package=package,
+            reason="assigned",
+        )
 
     @patch(
         "apps.intracity.services.package_assignment._publish_assignments"

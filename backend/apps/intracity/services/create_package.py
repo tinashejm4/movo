@@ -8,6 +8,7 @@ from apps.users.models import City, Customer, Suburb
 
 from ..models import Invoice, Package, PackageStatus
 from .customer_provisioning import resolve_or_create_customer
+from .current_package_updates import notify_current_packages_changed
 from .package_assignment import assign_pending_packages_safely
 from .package_notifications import send_package_booking_sms
 
@@ -83,6 +84,7 @@ def create_package(*, user, data):
             invoice,
         )
     )
+    notify_current_packages_changed(package=package, reason="created")
     transaction.on_commit(assign_pending_packages_safely)
     return package, invoice
 

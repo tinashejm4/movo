@@ -472,6 +472,81 @@ class ConfirmCashReceivedEndpointTests(APITestCase):
         )
 
 
+class CurrentPackageLifecycleUpdateTests(APITestCase):
+    def setUp(self):
+        self.biker_user = User.objects.create_user(username="updates-driver")
+        self.biker = Biker.objects.create(user=self.biker_user)
+        self.sender = Customer.objects.create(
+            user=User.objects.create_user(username="updates-sender")
+        )
+        self.receiver = Customer.objects.create(
+            user=User.objects.create_user(username="updates-receiver")
+        )
+        self.package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=City.objects.create(name="Lifecycle City"),
+            biker=self.biker,
+            pickup_address="Pickup",
+            dropoff_address="Dropoff",
+            sender_code="111111",
+            receiver_code="222222",
+        )
+        self.invoice = Invoice.objects.create(
+            package=self.package,
+            amount=Decimal("10.00"),
+            payment_method="Cash",
+            is_paid=True,
+        )
+        self.client.force_authenticate(user=self.biker_user)
+
+    @patch("apps.transporters.views.notify_current_packages_changed")
+    def test_pickup_notifies_current_packages(self, notify):
+        PackageStatus.objects.create(package=self.package, status="Assigned")
+
+        response = self.client.post(
+            reverse("pickup_package"),
+            {"package_id": self.package.id, "sender_code": "111111"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        notify.assert_called_once_with(package=self.package, reason="picked_up")
+
+    @patch("apps.transporters.views.notify_current_packages_changed")
+    @patch("apps.transporters.views.assign_pending_packages")
+    def test_delivery_notifies_current_packages(self, assign_packages, notify):
+        assign_packages.return_value = {
+            "message": "No pending packages available for assignment",
+            "assigned_count": 0,
+            "unassigned_count": 0,
+            "assigned_packages": [],
+        }
+        PackageStatus.objects.create(package=self.package, status="In Transit")
+
+        response = self.client.post(
+            reverse("dropoff_package"),
+            {"package_id": self.package.id, "receiver_code": "222222"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        notify.assert_called_once_with(package=self.package, reason="delivered")
+
+    @patch("apps.transporters.views.notify_current_packages_changed")
+    def test_cancellation_notifies_current_packages(self, notify):
+        PackageStatus.objects.create(package=self.package, status="Pending")
+
+        response = self.client.post(
+            reverse("cancel_package"),
+            {"package_id": self.package.id, "reason": "Unable to collect"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        notify.assert_called_once_with(package=self.package, reason="cancelled")
+
+
 class BikerSalesAndOrdersEndpointTests(APITestCase):
     def setUp(self):
         self.biker_user = User.objects.create_user(

@@ -1,7 +1,9 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework.response import Response
@@ -199,6 +201,52 @@ class IntracityPackageListTests(APITestCase):
         self.assertEqual(len(response.data["packages"]), 1)
         self.assertEqual(response.data["packages"][0]["package_id"], active_package.id)
         self.assertEqual(response.data["packages"][0]["confirmation_code"], "111111")
+
+    def test_current_packages_prioritizes_status_then_newest_creation(self):
+        def create_package(pickup_address):
+            return Package.objects.create(
+                sender=self.sender,
+                receiver=self.receiver,
+                city=self.city,
+                pickup_address=pickup_address,
+                dropoff_address="Borrowdale",
+                sender_code="111111",
+                receiver_code="222222",
+            )
+
+        now = timezone.now()
+        pending_newest = create_package("Pending")
+        assigned_older = create_package("Assigned older")
+        assigned_newer = create_package("Assigned newer")
+        in_transit_oldest = create_package("In transit")
+
+        Package.objects.filter(pk=pending_newest.pk).update(added_at=now)
+        Package.objects.filter(pk=assigned_older.pk).update(
+            added_at=now - timedelta(minutes=30)
+        )
+        Package.objects.filter(pk=assigned_newer.pk).update(
+            added_at=now - timedelta(minutes=10)
+        )
+        Package.objects.filter(pk=in_transit_oldest.pk).update(
+            added_at=now - timedelta(hours=1)
+        )
+        PackageStatus.objects.create(package=pending_newest, status="Pending")
+        PackageStatus.objects.create(package=assigned_older, status="Assigned")
+        PackageStatus.objects.create(package=assigned_newer, status="Assigned")
+        PackageStatus.objects.create(package=in_transit_oldest, status="In Transit")
+
+        response = self.client.get(reverse("intracity_current_packages"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [package["package_id"] for package in response.data["packages"]],
+            [
+                in_transit_oldest.id,
+                assigned_newer.id,
+                assigned_older.id,
+                pending_newest.id,
+            ],
+        )
 
     def test_package_status_includes_assigned_driver_number(self):
         package = Package.objects.create(

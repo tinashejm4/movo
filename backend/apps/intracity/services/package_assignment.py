@@ -11,6 +11,7 @@ from apps.transporters.models import BikerDailySession
 from apps.notifications.services import queue_package_assignment_notifications
 
 from ..models import Package, PackageStatus
+from .current_package_updates import notify_current_packages_changed
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ def assign_pending_packages():
         package.assigned_at = assigned_at
         package.save(update_fields=["biker", "assigned_at"])
         PackageStatus.objects.create(package=package, status="Assigned")
+        notify_current_packages_changed(package=package, reason="assigned")
         queue_package_assignment_notifications(package=package, biker=biker)
         assigned_packages.append(_assignment_payload(package, biker))
 
@@ -156,10 +158,6 @@ def _publish_assignments(assignments):
                 "assign_pending_packages: publishing package_id=%s biker_id=%s",
                 payload["package_id"],
                 payload["biker_id"],
-            )
-            async_to_sync(channel_layer.group_send)(
-                "package_assignments",
-                {"type": "package.assigned", "payload": payload},
             )
             async_to_sync(channel_layer.group_send)(
                 f"package_{payload['package_id']}",
