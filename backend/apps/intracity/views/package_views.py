@@ -1,6 +1,6 @@
 from django.utils import timezone
 
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Case, IntegerField, OuterRef, Q, Subquery, When
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -732,6 +732,16 @@ class PackageViewSet(ViewSet):
             )
             .annotate(current_status=Subquery(latest_status))
             .exclude(current_status="Cancelled")
+            .annotate(
+                current_package_priority=Case(
+                    When(current_status="In Transit", then=0),
+                    When(current_status="Assigned", then=1),
+                    When(current_status="Pending", then=2),
+                    default=3,
+                    output_field=IntegerField(),
+                )
+            )
+            .order_by("current_package_priority", "-added_at", "-pk")
         )
 
         page_packages = list(current_packages)
