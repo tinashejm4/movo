@@ -404,7 +404,6 @@ class CustomerRegisterLoginView(APIView):
             username=username, password=CUSTOMER_DEFAULT_PASSWORD
         )
         Customer.objects.create(user=user)
-        Contact.objects.create(user=user, phone_number=username)
         otp.delete()
 
         # Generate JWT tokens

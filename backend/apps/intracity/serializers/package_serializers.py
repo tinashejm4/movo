@@ -111,10 +111,6 @@ class PackageCreateSerializer(serializers.Serializer):
     is_pay_forward = serializers.BooleanField(required=False, default=False)
     is_sender_initiated = serializers.BooleanField(required=False, default=True)
 
-
-
-
-
 class PackagePriceRequestSerializer(serializers.Serializer):
     city_id = serializers.IntegerField(required=True)
     from_suburb_id = serializers.IntegerField()

@@ -1,18 +1,26 @@
 from django.urls import path
 
 from apps.adminportal.views.surbubs_views import (
-    SuburbsImportView, SuburbView, CityView, SuburbAliasiew,)
+    SuburbsImportView, 
+    SuburbView, 
+    CityView, 
+    SuburbAliasiew,)
+
+from apps.adminportal.views.live_dashboard import (
+    BikerMetricsView, 
+    MainMetricsView, 
+    PackageListView,
+    PackageDetailsView
+)
 
 from apps.adminportal.views.bikers_views import (
     BikersListView,
     BikerDetailView,
     BikerStatisticsView,
     BikerCreateView
-
 )
 
 from .views.delivery_order_views import DeliveryPageView
-
 
 delivery_metrics = DeliveryPageView.as_view({"get": "delivery_metrics"})
 delivery_order_list = DeliveryPageView.as_view({"get": "delivery_order_list"})
@@ -31,5 +39,9 @@ urlpatterns = [
     path("bikers/<int:biker_user_id>/", BikerDetailView.as_view(), name="biker_view"),
     path("bikers/create/", BikerCreateView.as_view(), name="biker_create_view"),
     path("bikers/statistics/", BikerStatisticsView.as_view(), name="biker_statistics_view"),
+    path("bikers-metrics/", BikerMetricsView.as_view(), name="biker_live_metrics_view"),
+    path("main-metrics/", MainMetricsView.as_view(), name="main_live_metrics_view"),
+    path("packages-list/", PackageListView.as_view(), name="packages_live_metrics_view"),
+    path("packages-details/", PackageDetailsView.as_view(), name="packages_details_view"),
 
 ]
