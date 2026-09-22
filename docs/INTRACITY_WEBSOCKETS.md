@@ -1,70 +1,107 @@
-# Intracity package-assignment WebSockets
+# Intracity WebSockets
 
-Use this connection when the customer is viewing an active package and needs to
-know as soon as a biker has been assigned. The socket is a notification channel:
-the existing intracity REST endpoints remain the source of truth for package,
-driver, and payment data.
+Intracity WebSockets are notification channels. REST remains the source of
+truth for current-package, package-detail, driver, and payment data.
 
 ## Prerequisites
 
 - Use the user's **access JWT** returned by login or token refresh. Do not send
   the refresh token.
 - Add [`web_socket_channel`](https://pub.dev/packages/web_socket_channel) to
-  the Flutter app if it is not already present.
-- Connect only while the package-detail/tracking screen is visible, then close
-  the socket when leaving it.
+  Flutter if it is not already present.
+- Use `wss` in production and ensure reverse-proxy logs redact the `token`
+  query parameter.
 
-## Endpoint
+## Current-packages dashboard subscription
 
-Subscribe to one package rather than the global endpoint:
-
-```text
-wss://api.example.com/ws/intracity/assignments/<package_id>/?token=<access_jwt>
-```
-
-For local HTTP development, use `ws` instead of `wss`:
+Connect once while the authenticated customer session and dashboard/home state
+are active:
 
 ```text
-ws://10.0.2.2:8000/ws/intracity/assignments/<package_id>/?token=<access_jwt>
+wss://api.example.com/ws/intracity/assignments/?token=<access_jwt>
 ```
 
-The server also exposes `/ws/intracity/assignments/`, but package-specific
-subscriptions are the intended customer-app integration.
+For local HTTP development:
 
-### Access rules
+```text
+ws://10.0.2.2:8000/ws/intracity/assignments/?token=<access_jwt>
+```
 
-The socket accepts only a valid, active user's access JWT. For a particular
-package, the user must be its sender, receiver, or assigned biker. The server
-closes the handshake with:
+The global URL is scoped on the server to the authenticated user's private
+current-packages group. It no longer emits full `package_assigned` payloads.
 
-| Close code | Meaning |
-| --- | --- |
-| `4401` | JWT missing, invalid, expired, refresh-token, or user inactive |
-| `4403` | JWT is valid but the user cannot view this package |
-
-The global endpoint is filtered by the same rule, so it only sends events for
-packages that the connected user may access.
-
-## Messages from the server
-
-Immediately after an accepted connection:
+Immediately after an accepted connection, the server sends:
 
 ```json
 {
   "event": "connected",
   "data": {
-    "group": "package_123",
-    "package_id": 123,
+    "group": "current_packages_user_42",
+    "package_id": null,
     "subscribed": true
   }
 }
 ```
 
-`subscribed: false` means the connection is open but the Channels group could
-not be joined (for example, the configured Redis channel layer is unavailable).
-Continue with REST polling/retry rather than treating that socket as live.
+`subscribed: false` means the connection was accepted but the Channels group
+could not be joined. Continue using REST and retry the socket instead of
+treating it as live.
 
-When dispatch assigns a biker:
+When the user's current packages change, the server sends only an invalidation
+notification:
+
+```json
+{
+  "event": "current_packages_changed",
+  "data": {
+    "package_id": 123,
+    "reason": "assigned"
+  }
+}
+```
+
+`reason` is one of `created`, `assigned`, `picked_up`, `cancelled`, or
+`delivered`. On every such event, debounce overlapping refreshes and fetch all
+data again from:
+
+```text
+GET /api/intracity/current-packages/
+```
+
+Do not merge the event body into cached packages. The event can be missed or
+replayed, and a cancellation may mean the package must be removed from the
+list.
+
+Also refresh the REST endpoint immediately after a successful connection or
+reconnection. Close the global socket on logout and replace it after the access
+token or signed-in user changes.
+
+### Flutter message handling
+
+```dart
+Future<void> onMessage(dynamic rawMessage) async {
+  final message = jsonDecode(rawMessage as String) as Map<String, dynamic>;
+  if (message['event'] != 'current_packages_changed') return;
+
+  // Debounce this in the owning Riverpod/controller so a burst of lifecycle
+  // events produces one authoritative REST refresh.
+  // refresh() calls getCurrentPackages(), which follows every response page.
+  await ref.read(currentPackagesProvider.notifier).refresh();
+}
+```
+
+## Package-specific assignment subscription
+
+Package-detail/tracking screens continue to use the package-specific URL:
+
+```text
+wss://api.example.com/ws/intracity/assignments/<package_id>/?token=<access_jwt>
+```
+
+Connect only while that package screen is visible and close the socket when
+leaving it. The user must be the package sender, receiver, or assigned biker.
+
+When dispatch assigns a biker, this socket still sends:
 
 ```json
 {
@@ -72,119 +109,30 @@ When dispatch assigns a biker:
   "data": {
     "package_id": 123,
     "slug": "mov-abc123",
-    "is_fast_delivery": false,
     "biker_id": 9,
     "biker_name": "Tendai Moyo",
-    "biker_phone": "0771234567",
-    "assigned_at": "2026-07-28T10:15:30+02:00",
-    "added_at": "2026-07-28T10:00:00+02:00"
+    "assigned_at": "2026-07-28T10:15:30+02:00"
   }
 }
 ```
 
-The socket currently accepts no application messages from Flutter; it is
+Use this event only as a prompt to refresh the package-detail REST endpoint.
+
+## Authentication and reconnection
+
+The server closes the handshake with:
+
+| Close code | Meaning |
+| --- | --- |
+| `4401` | JWT missing, invalid, expired, is a refresh token, or belongs to an inactive user |
+| `4403` | JWT is valid but the user cannot view the requested package-specific subscription |
+
+- On `4401`, refresh the access token normally and create a new WebSocket URL.
+- On package-specific `4403`, stop reconnecting and show the normal unavailable
+  or unauthorized package state.
+- For transient closures, reconnect with bounded exponential backoff.
+- Keep REST refresh-on-resume behavior because backgrounded apps can miss
+  WebSocket notifications.
+
+The sockets accept no application messages from Flutter; both are
 server-to-client only.
-
-## Flutter example
-
-```dart
-import 'dart:async';
-import 'dart:convert';
-
-import 'package:web_socket_channel/web_socket_channel.dart';
-
-class PackageAssignmentSocket {
-  PackageAssignmentSocket({
-    required this.apiBaseUri,
-    required this.packageId,
-    required this.accessToken,
-    required this.onAssignment,
-    required this.refreshPackage,
-  });
-
-  final Uri apiBaseUri;
-  final int packageId;
-  final String accessToken;
-  final void Function(Map<String, dynamic> assignment) onAssignment;
-  final Future<void> Function() refreshPackage;
-
-  WebSocketChannel? _channel;
-  StreamSubscription<dynamic>? _subscription;
-
-  Future<void> connect() async {
-    final scheme = apiBaseUri.scheme == 'https' ? 'wss' : 'ws';
-    final uri = apiBaseUri.replace(
-      scheme: scheme,
-      path: '/ws/intracity/assignments/$packageId/',
-      queryParameters: {'token': accessToken},
-    );
-
-    _channel = WebSocketChannel.connect(uri);
-    await _channel!.ready;
-    _subscription = _channel!.stream.listen(
-      _onMessage,
-      onError: (_) => _scheduleReconnect(),
-      onDone: _scheduleReconnect,
-    );
-  }
-
-  Future<void> _onMessage(dynamic rawMessage) async {
-    final message = jsonDecode(rawMessage as String) as Map<String, dynamic>;
-    if (message['event'] != 'package_assigned') return;
-
-    final assignment = message['data'] as Map<String, dynamic>;
-    onAssignment(assignment);
-
-    // Refresh from REST: a WebSocket event can be missed while reconnecting,
-    // and REST remains authoritative for the full package record.
-    await refreshPackage();
-  }
-
-  void _scheduleReconnect() {
-    // Implement bounded exponential backoff in the owning Riverpod/controller.
-    // Do not reconnect after dispose or once the package is complete/cancelled.
-  }
-
-  Future<void> dispose() async {
-    await _subscription?.cancel();
-    await _channel?.sink.close();
-  }
-}
-```
-
-Example construction, where `apiBaseUri` is `https://api.example.com`:
-
-```dart
-final socket = PackageAssignmentSocket(
-  apiBaseUri: Uri.parse(apiBaseUrl),
-  packageId: package.packageId,
-  accessToken: authState.accessToken,
-  onAssignment: (assignment) {
-    // Optionally update a temporary "driver found" UI state here.
-  },
-  refreshPackage: () => ref.read(packageDetailsProvider(package.packageId).notifier).refresh(),
-);
-await socket.connect();
-```
-
-## Reconnection and token refresh
-
-- On `4401`, obtain a new access token through the normal refresh flow, then
-  create a new WebSocket URL and reconnect. Do not use the refresh token in the
-  URL.
-- On `4403`, stop reconnecting and show the normal unavailable/not-authorized
-  package state.
-- For transient network closure, reconnect with bounded exponential backoff.
-- When a connection is restored, refresh the package from REST before relying
-  on subsequent events. A socket can miss an assignment during backgrounding or
-  a network outage.
-- Keep low-frequency REST polling as a fallback while the user is actively
-  waiting for a driver; stop it after assignment, cancellation, delivery, or
-  when the screen is disposed.
-
-## Token handling note
-
-The access token is sent as a WebSocket query parameter because browser
-WebSocket APIs cannot reliably attach an `Authorization` header during the
-handshake. Always use `wss` in production and ensure reverse-proxy access logs
-redact the `token` query parameter.

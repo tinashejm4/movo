@@ -7,6 +7,7 @@ from channels.db import database_sync_to_async
 from django.db.models import Q
 
 from .models import Package
+from .services.current_package_updates import current_packages_group_name
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,6 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
             await self.close(code=4401, reason=reason)
             return
 
-        self.global_group = "package_assignments"
         self.package_id = self.scope["url_route"]["kwargs"].get("package_id")
         if self.package_id is not None and not await self._can_access_package(
             self.package_id
@@ -49,7 +49,7 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
         self.group_name = (
             f"package_{self.package_id}"
             if self.package_id is not None
-            else self.global_group
+            else current_packages_group_name(self.user.id)
         )
 
         # Accept first so a slow/unreachable channel layer never blocks the handshake.
@@ -112,6 +112,17 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
                     "data": payload,
                 },
                 default=str,
+            )
+        )
+
+    async def current_packages_changed(self, event):
+        """Tell the dashboard to refresh its server-authoritative REST list."""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "event": "current_packages_changed",
+                    "data": event.get("payload", {}),
+                }
             )
         )
 
