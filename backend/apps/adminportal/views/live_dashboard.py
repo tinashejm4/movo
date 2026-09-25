@@ -34,7 +34,7 @@ class MainMetricsView(APIView):
         for package in total_new_orders:
             if package.latest_status == "Delivered":
                 delivered_orders += 1
-            elif package.latest_status == "Canceled":
+            elif package.latest_status == "Cancelled":
                 canceled_orders += 1
             elif package.latest_status == "In Transit":
                 in_transit_orders += 1
@@ -93,7 +93,8 @@ class BikerMetricsView(APIView):
                 assigned_at__date=timezone.localdate()
             ).count()
 
-            session = BikerDailySession.objects.filter(biker=biker, is_active=True).first()
+            session = BikerDailySession.objects.filter(biker=biker, is_active=True, start_time__date=timezone.localdate()).first()
+
             biker_details.append({
                 "biker_id": biker.id,
                 "biker_name": biker.user.first_name + " " + biker.user.last_name,

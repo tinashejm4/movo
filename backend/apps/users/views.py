@@ -5,6 +5,7 @@ import json
 import math
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
@@ -77,7 +78,9 @@ class SuburbViewSet(viewsets.ModelViewSet):
         search = self.request.query_params.get("search", "").strip()
 
         if search:
-            queryset = queryset.filter(name__icontains=search)
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(aliases__alias__icontains=search)
+            ).distinct()
 
         return queryset
 

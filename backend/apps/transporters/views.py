@@ -211,6 +211,7 @@ class TransporterView(ViewSet):
             package=package,
             event_type="package.cancelled",
         )
+        assign_pending_packages()
         logger.log(
             logging.INFO,
             f"Package {package_id} cancelled by biker {request.user.id} for reason: {reason}. Date: {timezone.now()}",

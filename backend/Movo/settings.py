@@ -96,23 +96,19 @@ MIDDLEWARE = [
 ASGI_APPLICATION = "Movo.asgi.application"
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo-backend-935754022035.europe-west1.run.app",
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo-backend-935754022035.europe-west1.run.app",
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    
 ]
-
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
