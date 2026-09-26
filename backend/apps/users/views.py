@@ -390,9 +390,22 @@ class CustomerRegisterLoginView(APIView):
                 {"error": "phone_number and otp_code are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        logger.warning(
-            "Otp code received for username: %s, otp_code: %s", username, otp_code
-        )
+
+        # Check if the OTP is for the guest account
+        if username == "700000000":
+            user = authenticate(username=username, password=CUSTOMER_DEFAULT_PASSWORD)
+            logger.warning("username: %s", username)
+            logger.warning("password: %s", CUSTOMER_DEFAULT_PASSWORD)
+            refresh = RefreshToken.for_user(user)
+
+            return Response(
+                {
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
+                    "username": user.username,
+                    "is_profile_complete": True,
+                }
+            )
 
         try:
             otp = OTP.objects.get(username=username, otp_code=otp_code)
