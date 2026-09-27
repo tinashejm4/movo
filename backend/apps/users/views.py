@@ -560,6 +560,32 @@ class CustomerProfileView(viewsets.ModelViewSet):
         )
 
 
+class CustomerDeactivateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Customer Stuff"],
+        request=None,
+        responses={
+            200: OpenApiResponse(
+                description="Customer profile successfully deactivated"
+            ),
+            404: OpenApiResponse(
+                ErrorResponseSerializer, description="Customer profile not found"
+            ),
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        user = request.user
+
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+        return Response(
+            {"message": "Customer profile successfully deactivated"},
+            status=status.HTTP_200_OK,
+        )
+
 class DriverLoginView(APIView):
     authentication_classes = []
 

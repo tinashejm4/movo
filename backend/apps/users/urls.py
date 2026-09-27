@@ -12,6 +12,7 @@ from .views import (
     DriverLoginView,
     DriverProfileView,
     BranchListView,
+    CustomerDeactivateView
 )
 
 router = DefaultRouter()
@@ -33,6 +34,7 @@ urlpatterns = [
         CustomerRegisterLoginView.as_view(),
         name="customer_register_login",
     ),
+    path("customer/deactivate/", CustomerDeactivateView.as_view(), name="customer_deactivate"),
     path("otp/", OTPCreateView.as_view(), name="customer_otp"),
     path("driver/login/", DriverLoginView.as_view(), name="driver_token_obtain_pair"),
     path("driver/refresh/", TokenRefreshView.as_view(), name="driver_token_refresh"),
