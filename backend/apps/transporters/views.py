@@ -211,6 +211,7 @@ class TransporterView(ViewSet):
             package=package,
             event_type="package.cancelled",
         )
+        assign_pending_packages()
         logger.log(
             logging.INFO,
             f"Package {package_id} cancelled by biker {request.user.id} for reason: {reason}. Date: {timezone.now()}",
@@ -771,10 +772,14 @@ class TransporterView(ViewSet):
         }
 
         orders_data = []
+        active_or_delivered = []
         cash_collected = Decimal("0.00")
         for package in packages:
             invoice = package.invoice
             order_cash_collected = cash_sales.get(invoice.id, Decimal("0.00"))
+
+            if package.current_status in ["Assigned", "In Transit", "Delivered"]:
+                active_or_delivered.append(package)
             data = {
                 "package_id": package.id,
                 "slug": package.slug,
@@ -811,7 +816,7 @@ class TransporterView(ViewSet):
 
         return Response(
             {
-                "total_orders": len(orders_data),
+                "total_orders": len(active_or_delivered),
                 "cash_collected": cash_collected,
                 "orders": orders_data,
             },

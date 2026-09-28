@@ -5,6 +5,7 @@ import json
 import math
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
@@ -32,7 +33,7 @@ from apps.users.serializers import (
     LogoutResponseSerializer,
     DriverProfileResponseSerializer,
 )
-from .models import OTP, Biker, City, Contact, Customer, ProfileImage, Staff, Suburb
+from .models import OTP, Biker, Branch, City, Contact, Customer, ProfileImage, Staff, Suburb
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.exceptions import TokenError
@@ -77,89 +78,11 @@ class SuburbViewSet(viewsets.ModelViewSet):
         search = self.request.query_params.get("search", "").strip()
 
         if search:
-            queryset = queryset.filter(name__icontains=search)
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(aliases__alias__icontains=search)
+            ).distinct()
 
         return queryset
-
-
-class ImportAreasView(APIView):
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        tags=["Users"],
-        responses={
-            200: OpenApiResponse(description="Areas imported successfully"),
-            400: OpenApiResponse(description="Invalid data in areas.json"),
-            404: OpenApiResponse(description="areas.json or CBD area not found"),
-        },
-    )
-    def post(self, request):
-
-        areas_path = Path(__file__).resolve().parents[2] / "areas.json"
-        if not areas_path.exists():
-            return Response(
-                {"error": f"areas.json not found at {areas_path}"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        try:
-            areas = json.loads(areas_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return Response(
-                {"error": "areas.json is not valid JSON"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not isinstance(areas, list):
-            return Response(
-                {"error": "areas.json must contain a JSON array"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        created_count = 0
-        updated_count = 0
-        skipped_count = 0
-
-        for row in areas:
-            city, _ = City.objects.get_or_create(name=int(row["city_id"]))
-
-            area_name = str(row.get("Areas", "")).strip()
-            if not area_name:
-                skipped_count += 1
-                continue
-
-            try:
-                lat = float(row["x"])
-                lon = float(row["y"])
-            except (TypeError, ValueError, KeyError):
-                skipped_count += 1
-                continue
-
-            defaults = {
-                "x_coord": Decimal(str(lat)),
-                "y_coord": Decimal(str(lon)),
-            }
-            _, created = Suburb.objects.update_or_create(
-                city=city,
-                name=area_name,
-                defaults=defaults,
-            )
-            if created:
-                created_count += 1
-            else:
-                updated_count += 1
-
-        return Response(
-            {
-                "message": "Areas imported successfully",
-                "city": city.name,
-                "created": created_count,
-                "updated": updated_count,
-                "skipped": skipped_count,
-                "total": len(areas),
-            },
-            status=status.HTTP_200_OK,
-        )
 
 
 class StaffProfileView(APIView):
@@ -467,9 +390,22 @@ class CustomerRegisterLoginView(APIView):
                 {"error": "phone_number and otp_code are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        logger.warning(
-            "Otp code received for username: %s, otp_code: %s", username, otp_code
-        )
+
+        # Check if the OTP is for the guest account
+        if username == "700000000":
+            user = authenticate(username=username, password=CUSTOMER_DEFAULT_PASSWORD)
+            logger.warning("username: %s", username)
+            logger.warning("password: %s", CUSTOMER_DEFAULT_PASSWORD)
+            refresh = RefreshToken.for_user(user)
+
+            return Response(
+                {
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
+                    "username": user.username,
+                    "is_profile_complete": True,
+                }
+            )
 
         try:
             otp = OTP.objects.get(username=username, otp_code=otp_code)
@@ -505,7 +441,6 @@ class CustomerRegisterLoginView(APIView):
             username=username, password=CUSTOMER_DEFAULT_PASSWORD
         )
         Customer.objects.create(user=user)
-        Contact.objects.create(user=user, phone_number=username)
         otp.delete()
 
         # Generate JWT tokens
@@ -625,6 +560,32 @@ class CustomerProfileView(viewsets.ModelViewSet):
         )
 
 
+class CustomerDeactivateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Customer Stuff"],
+        request=None,
+        responses={
+            200: OpenApiResponse(
+                description="Customer profile successfully deactivated"
+            ),
+            404: OpenApiResponse(
+                ErrorResponseSerializer, description="Customer profile not found"
+            ),
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        user = request.user
+
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+        return Response(
+            {"message": "Customer profile successfully deactivated"},
+            status=status.HTTP_200_OK,
+        )
+
 class DriverLoginView(APIView):
     authentication_classes = []
 
@@ -721,5 +682,26 @@ class DriverProfileView(APIView):
                 "profile_image": profile_image.profile_image.url,
                 "joined_on": biker.date_joined,
             },
+            status=status.HTTP_200_OK,
+        )
+
+
+class BranchListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+
+    def get(self, request):
+        branches = Branch.objects.all()
+        branch_list = []
+        for branch in branches:
+            branch_list.append(
+                {
+                    "branch_id": branch.id,
+                    "name": branch.name,
+                    "address": branch.address,
+                }
+            )
+        return Response(
+            branch_list,
             status=status.HTTP_200_OK,
         )

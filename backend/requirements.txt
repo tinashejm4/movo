@@ -18,3 +18,5 @@ firebase-admin
 daphne
 whitenoise
 celery[redis]
+django-storages[azure]
+azure-storage-blob

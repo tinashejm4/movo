@@ -4,10 +4,17 @@ from apps.users.models import Branch
 from django.contrib.auth.models import User
 
 class Account(models.Model):
+    CURRENCY_CHOICES = [
+        ("USD", "US Dollar"),
+        ("EUR", "Euro"),
+        ("ZWL", "Zimbabwean Dollar"),
+        ("RAN", "South African Rand"),
+    ]
+
     name = models.CharField(max_length = 50)
     branch = models.ForeignKey(Branch, on_delete = models.CASCADE, blank = True, null = True)
     owner = models.ForeignKey(User, on_delete = models.SET_NULL, null = True, blank = True)
-    currency = models.CharField(max_length = 10, default = "USD")
+    currency = models.CharField(max_length = 10, choices=CURRENCY_CHOICES, default = "USD")
     description = models.TextField(blank = True, null = True)
     number = models.CharField(max_length = 20, blank = True, null = True)
     added_at = models.DateField(auto_now_add = True)
@@ -44,6 +51,10 @@ class Expense(models.Model):
     expense_type = models.ForeignKey(ExpenseAccount, on_delete = models.CASCADE)
     amount = models.FloatField(default = 0)
     comment = models.TextField(blank = True, null = True)
+    is_reversed = models.BooleanField(default = False)
+    reversed_at = models.DateField(blank = True, null = True)
+    reversed_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True, related_name="reversed_expenses")
+    reason_for_reversal = models.TextField(blank = True, null = True)
     added_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True)
     added_at = models.DateField(auto_now_add = True)
 

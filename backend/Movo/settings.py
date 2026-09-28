@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "channels",
     "corsheaders",
+    "storages",
     #! Local apps
     "apps.notifications.apps.NotificationsConfig",
     "apps.users.apps.UsersConfig",
@@ -95,23 +96,19 @@ MIDDLEWARE = [
 ASGI_APPLICATION = "Movo.asgi.application"
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo-backend-935754022035.europe-west1.run.app",
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "https://movobackend01-ccehf3gqbedmg6ax.southafricanorth-01.azurewebsites.net",
+    "https://movo-backend-935754022035.europe-west1.run.app",
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    
 ]
-
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -302,28 +299,20 @@ else:
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-if os.environ.get("DB_HOST"):
-    db_sslmode = os.environ.get("DB_SSLMODE")
-    db_options = {"sslmode": db_sslmode} if db_sslmode else {}
+db_sslmode = os.environ.get("DB_SSLMODE")
+db_options = {"sslmode": db_sslmode} if db_sslmode else {}
 
-    DATABASES = {
-        "default": {
-            "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
-            "NAME": os.environ.get("DB_NAME", "movo_db"),
-            "USER": os.environ.get("DB_USER", "movo_user"),
-            "PASSWORD": os.environ.get("DB_PASSWORD", "movo_password"),
-            "HOST": os.environ.get("DB_HOST", "db"),
-            "PORT": os.environ.get("DB_PORT", "5432"),
-            "OPTIONS": db_options,
-        }
+DATABASES = {
+    "default": {
+        "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
+        "NAME": os.environ.get("DB_NAME", "movo_db"),
+        "USER": os.environ.get("DB_USER", "movo_user"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", "movo_password"),
+        "HOST": os.environ.get("DB_HOST", "db"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+        "OPTIONS": db_options,
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+}
 
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -362,6 +351,31 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
+
+if not DEBUG:
+    DEFAULT_FILE_STORAGE = "storages.backends.azure_storage.AzureStorage"
+    AZURE_ACCOUNT_NAME = os.environ.get("AZURE_ACCOUNT_NAME")
+    AZURE_ACCOUNT_KEY = os.environ.get("AZURE_ACCOUNT_KEY")
+    AZURE_CONTAINER = os.environ.get("AZURE_CONTAINER")
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "Movo.storage_backends.AzureMediaStorage",
+            "OPTIONS": {
+                "account_name": AZURE_ACCOUNT_NAME,
+                "account_key": AZURE_ACCOUNT_KEY,
+                "azure_container": AZURE_CONTAINER,
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+    MEDIA_URL = (
+        f"https://{AZURE_ACCOUNT_NAME}.blob.core.windows.net/{AZURE_CONTAINER}/"
+    )
+
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATIC_URL = "/static/"
