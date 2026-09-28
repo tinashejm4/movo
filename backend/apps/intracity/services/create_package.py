@@ -48,6 +48,9 @@ def create_package(*, user, data):
         sender = counterpart
         receiver = Customer.objects.get(user=user)
 
+    if not sender.user.is_active or not receiver.user.is_active:
+        raise PackageCreationError("Sender or receiver has been deactivated")
+
     try:
         pickup_area = Suburb.objects.get(id=pickup_area_id)
         dropoff_area = Suburb.objects.get(id=dropoff_area_id)
