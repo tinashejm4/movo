@@ -48,6 +48,7 @@ def create_package(*, user, data):
         sender = counterpart
         receiver = Customer.objects.get(user=user)
 
+    #prevent deactivated users from receiving packages
     if not sender.user.is_active or not receiver.user.is_active:
         raise PackageCreationError("Sender or receiver has been deactivated")
 

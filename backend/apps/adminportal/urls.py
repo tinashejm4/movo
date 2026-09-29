@@ -20,6 +20,12 @@ from apps.adminportal.views.bikers_views import (
     BikerCreateView
 )
 
+from apps.adminportal.views.customer_views import (
+    CustomersListView,
+    CustomersDetailView,        
+    CustomersMetricsView
+)
+
 from .views.delivery_order_views import DeliveryPageView
 
 delivery_metrics = DeliveryPageView.as_view({"get": "delivery_metrics"})
@@ -43,5 +49,7 @@ urlpatterns = [
     path("main-metrics/", MainMetricsView.as_view(), name="main_live_metrics_view"),
     path("packages-list/", PackageListView.as_view(), name="packages_live_metrics_view"),
     path("packages-details/", PackageDetailsView.as_view(), name="packages_details_view"),
-
+    path("customers-metrics/", CustomersMetricsView.as_view(), name="customers_metrics_view"),
+    path("customers/", CustomersListView.as_view(), name="customers_list_view"),
+    path("customers/<int:pk>/", CustomersDetailView.as_view(), name="customers_detail_view"),
 ]
