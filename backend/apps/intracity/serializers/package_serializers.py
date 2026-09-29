@@ -50,18 +50,31 @@ class PackageDetailRequestSerializer(serializers.Serializer):
     delivered_at = serializers.DateTimeField(allow_null=True)
 
 
+class PackageListStatusSerializer(serializers.Serializer):
+    driver_number = serializers.CharField(allow_null=True, allow_blank=True)
+    status = serializers.CharField()
+    status_updated_at = serializers.DateTimeField(allow_null=True)
+    is_active = serializers.BooleanField()
+    assigned_at = serializers.DateTimeField(allow_null=True)
+    is_collected = serializers.BooleanField()
+    collected_at = serializers.DateTimeField(allow_null=True)
+    is_cancelled = serializers.BooleanField()
+    cancelled_at = serializers.DateTimeField(allow_null=True)
+    can_cancel = serializers.BooleanField()
+    is_delivered = serializers.BooleanField()
+    delivered_at = serializers.DateTimeField(allow_null=True)
+
+
 class PackageListRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     initiator_id = serializers.IntegerField()
     confirmation_code = serializers.CharField(allow_null=True)
     pickup_address = serializers.CharField()
     dropoff_address = serializers.CharField()
-    collected_at = serializers.DateTimeField(allow_null=True)
-    delivered_at = serializers.DateTimeField(allow_null=True)
-    assigned_at = serializers.DateTimeField(allow_null=True)
     slug = serializers.CharField()
     is_incoming = serializers.BooleanField(allow_null=True)
     package_created_at = serializers.DateTimeField()
+    status = PackageListStatusSerializer()
 
 
 PackageRequestSerializer = PackageDetailRequestSerializer
