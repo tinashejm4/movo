@@ -47,6 +47,14 @@ class OTPCreateResponseSerializer(serializers.Serializer):
     otp = serializers.CharField()
 
 
+class UserActiveStatusRequestSerializer(serializers.Serializer):
+    phone_number = serializers.CharField()
+
+
+class UserActiveStatusResponseSerializer(serializers.Serializer):
+    is_active = serializers.BooleanField()
+
+
 class CustomerRegisterLoginRequestSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
     otp_code = serializers.CharField()

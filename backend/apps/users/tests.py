@@ -35,6 +35,56 @@ class SuburbViewSetTests(APITestCase):
         )
 
 
+class UserActiveStatusTests(APITestCase):
+    def setUp(self):
+        requester = User.objects.create_user(
+            username="771000001",
+            password="Pass@123",
+        )
+        self.client.force_authenticate(user=requester)
+
+    def test_returns_the_existing_users_active_status(self):
+        User.objects.create_user(
+            username="771000002",
+            password="Pass@123",
+            is_active=False,
+        )
+
+        response = self.client.post(
+            reverse("user_active_status"),
+            {"phone_number": "0771000002"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"is_active": False})
+
+    def test_returns_true_for_an_existing_active_user(self):
+        User.objects.create_user(
+            username="771000004",
+            password="Pass@123",
+        )
+
+        response = self.client.post(
+            reverse("user_active_status"),
+            {"phone_number": "263771000004"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"is_active": True})
+
+    def test_returns_true_when_the_number_is_not_registered(self):
+        response = self.client.post(
+            reverse("user_active_status"),
+            {"phone_number": "0771000003"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"is_active": True})
+
+
 class CustomerOtpAuthTests(APITestCase):
     def test_otp_creation_creates_or_refreshes_expiry(self):
         phone_number = "0771234567"

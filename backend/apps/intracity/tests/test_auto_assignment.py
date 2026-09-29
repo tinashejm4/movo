@@ -117,6 +117,36 @@ class AutomaticPackageAssignmentTests(APITestCase):
             reason="assigned",
         )
 
+    def test_create_package_rejects_a_deactivated_recipient(self):
+        receiver_user = User.objects.create_user(
+            username="771000002",
+            password="pass",
+            is_active=False,
+        )
+        Customer.objects.create(user=receiver_user)
+
+        response = self.client.post(
+            reverse("intracity_create_package"),
+            {
+                "phone": "0771000002",
+                "name": "Receiver",
+                "pickup_location": "Avondale",
+                "pickup_area_id": self.pickup_area.id,
+                "dropoff_location": "Borrowdale",
+                "dropoff_area_id": self.dropoff_area.id,
+                "amount": "10.00",
+                "is_sender_initiated": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["error"],
+            "Sender or receiver has been deactivated",
+        )
+        self.assertFalse(Package.objects.exists())
+
     @patch(
         "apps.intracity.services.package_assignment._publish_assignments"
     )

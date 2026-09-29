@@ -24,6 +24,8 @@ from apps.users.serializers import (
     CustomerRegisterLoginRequestSerializer,
     OTPCreateRequestSerializer,
     OTPCreateResponseSerializer,
+    UserActiveStatusRequestSerializer,
+    UserActiveStatusResponseSerializer,
     StaffLoginRequestSerializer,
     StaffProfileResponseSerializer,
     TokenPairResponseSerializer,
@@ -280,6 +282,42 @@ class OTPCreateView(APIView):
         return Response(
             {"message": "OTP requested successfully"},
             status=status.HTTP_201_CREATED,
+        )
+
+
+class UserActiveStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Customer Stuff"],
+        request=UserActiveStatusRequestSerializer,
+        responses={
+            200: UserActiveStatusResponseSerializer,
+            400: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Phone number is missing or invalid",
+            ),
+        },
+    )
+    def post(self, request):
+        serializer = UserActiveStatusRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        phone_number = serializer.validated_data["phone_number"]
+        if not is_valid_zimbabwean_number(phone_number):
+            return Response(
+                {"error": "Invalid Zimbabwean phone number"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        normalized_phone = normalize_zimbabwean_number(phone_number)
+        is_active = User.objects.filter(username=normalized_phone).values_list(
+            "is_active", flat=True
+        ).first()
+
+        return Response(
+            {"is_active": True if is_active is None else is_active},
+            status=status.HTTP_200_OK,
         )
 
 

@@ -22,6 +22,7 @@ from ..serializers.package_serializers import (
 )
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.create_package import (
+    PackageCreationError,
     PackageCreationNotFound,
     create_package as create_package_service,
 )
@@ -384,6 +385,11 @@ class PackageViewSet(ViewSet):
             return Response(
                 {"error": str(exc)},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+        except PackageCreationError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Automatic dispatch runs after the package-creation transaction commits.
