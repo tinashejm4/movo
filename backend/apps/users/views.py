@@ -146,6 +146,13 @@ class StaffLoginView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if Staff.objects.filter(user=user).exists():
+            staff = Staff.objects.get(user=user)
+        else:
+            return Response(
+                {"error": "Staff profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
         return Response(

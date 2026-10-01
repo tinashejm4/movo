@@ -7,6 +7,7 @@ from django.db import models
 
 class Branch(models.Model):
     name = models.CharField(max_length=100)
+    city = models.ForeignKey('City', on_delete=models.CASCADE, related_name='branches', null=True, blank=True)
     address = models.CharField(max_length=100)
     start_date = models.DateField(auto_now_add=True)
     
