@@ -26,12 +26,24 @@ from apps.adminportal.views.customer_views import (
     CustomersMetricsView
 )
 
+from apps.adminportal.views.accounts import (
+    AccountsListView,
+    AccountTransactionsView,
+    CreateFundsTransferView,
+    ReceiptImageView,
+    ExpenseReversalView,
+    ChargeReversalView,
+    FundsTransferReversalView,
+    CreateExpenseView,
+    ExpenseClassView,
+    CreateChargeView
+)
+
 from .views.delivery_order_views import DeliveryPageView
 
 delivery_metrics = DeliveryPageView.as_view({"get": "delivery_metrics"})
 delivery_order_list = DeliveryPageView.as_view({"get": "delivery_order_list"})
 today_delivery_metrics = DeliveryPageView.as_view({"get": "today_delivery_metrics"})
-
 
 urlpatterns = [
     path("delivery_metrics/", delivery_metrics, name="admin_delivery_metrics"),
@@ -52,4 +64,14 @@ urlpatterns = [
     path("customers-metrics/", CustomersMetricsView.as_view(), name="customers_metrics_view"),
     path("customers/", CustomersListView.as_view(), name="customers_list_view"),
     path("customers/<int:pk>/", CustomersDetailView.as_view(), name="customers_detail_view"),
+    path("accounts/", AccountsListView.as_view(), name="accounts_list_view"),
+    path("accounts/expense-classes/", ExpenseClassView.as_view(), name="expense_class_view"),
+    path("accounts/create-expense/", CreateExpenseView.as_view(), name="create_expense_view"),
+    path("accounts/create-charge/", CreateChargeView.as_view(), name="create_charge_view"),
+    path("accounts/create-funds-transfer/", CreateFundsTransferView.as_view(), name="create_funds_transfer_view"),
+    path("accounts/<int:account_id>/transactions/", AccountTransactionsView.as_view(), name="account_transactions_view"),
+    path("accounts/<int:account_id>/receipt-image/", ReceiptImageView.as_view(), name="receipt_image_view"),
+    path("accounts/<int:account_id>/expense-reversal/", ExpenseReversalView.as_view(), name="expense_reversal_view"),
+    path("accounts/<int:account_id>/charge-reversal/", ChargeReversalView.as_view(), name="charge_reversal_view"),
+    path("accounts/<int:account_id>/funds-transfer-reversal/", FundsTransferReversalView.as_view(), name="funds_transfer_reversal_view"),
 ]

@@ -648,7 +648,7 @@ class TransporterView(ViewSet):
         sales = (
             IntracitySale.objects.filter(
                 account=account,
-                added_at__range=(start_date, end_date),
+                added_at__date__range=(start_date, end_date),
                 invoice__payment_method="Cash",
             )
             .select_related("invoice")
@@ -701,7 +701,7 @@ class TransporterView(ViewSet):
                 float(sale.amount)
                 for sale in IntracitySale.objects.filter(
                     account=biker_account,
-                    added_at=timezone.localdate(),
+                    added_at__date=timezone.localdate(),
                     invoice__payment_method="Cash",
                 )
             ),
@@ -767,7 +767,7 @@ class TransporterView(ViewSet):
                 account__owner=request.user,
                 invoice__package__in=packages,
                 invoice__payment_method="Cash",
-                added_at__range=(start_date, end_date),
+                added_at__date__range=(start_date, end_date),
             )
         }
 
