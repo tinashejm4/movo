@@ -1,6 +1,6 @@
 import logging
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from .models import Notification, NotificationOutbox
 
@@ -71,6 +71,40 @@ def queue_package_customer_notification(*, package, event_type):
         event_type=event_type,
         recipient_user_ids=[package.sender.user_id, package.receiver.user_id],
     )
+
+
+def queue_driver_shift_notification(*, biker, interval, cutoff, event_type):
+    """Persist one shift alert per clock-in interval and effective cutoff."""
+    if event_type not in {"shift.closing_soon", "shift.closed"}:
+        raise ValueError("Unsupported driver shift notification")
+    key = f"{event_type}:{interval.pk}:{cutoff.isoformat()}"
+    clock_time = cutoff.strftime("%H:%M")
+    title, body = (
+        ("Shift ending soon", f"Your shift closes at {clock_time}.")
+        if event_type == "shift.closing_soon"
+        else (
+            "Shift closed",
+            "Your shift has closed. You will not receive new orders.",
+        )
+    )
+    try:
+        with transaction.atomic():
+            if NotificationOutbox.objects.filter(idempotency_key=key).exists():
+                return None
+            notification = Notification.objects.create(
+                user_id=biker.user_id,
+                event_type=event_type,
+                title=title,
+                body=body,
+                payload={"type": event_type, "shift_date": cutoff.date().isoformat()},
+            )
+            outbox = NotificationOutbox.objects.create(
+                notification=notification, idempotency_key=key,
+            )
+    except IntegrityError:
+        return None
+    transaction.on_commit(lambda outbox_id=outbox.pk: _enqueue(outbox_id))
+    return notification
 
 
 def _enqueue(outbox_id):

@@ -1,9 +1,17 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.db import transaction
 from django.utils import timezone
 
-from .models import BikerDailySession, DriverClockInterval, DriverShiftException, WeeklyDriverShift
+from apps.notifications.services import queue_driver_shift_notification
+
+from .models import (
+    BikerDailySession,
+    DriverClockInterval,
+    DriverShiftException,
+    DriverShiftReminderSetting,
+    WeeklyDriverShift,
+)
 
 
 def effective_shift(biker, day):
@@ -44,6 +52,15 @@ def clock_out(session, *, now, reason, boundary=None):
     session.is_active = False
     session.end_time = end
     session.save(update_fields=['is_active', 'end_time'])
+    if reason == DriverClockInterval.SCHEDULED:
+        shift = effective_shift(session.biker, session.date)
+        cutoff = scheduled_end(shift) if shift['is_open'] else end
+        queue_driver_shift_notification(
+            biker=session.biker,
+            interval=interval,
+            cutoff=cutoff,
+            event_type="shift.closed",
+        )
     return True
 
 
@@ -56,6 +73,29 @@ def reconcile_driver(biker, now=None):
         return False
     shift = effective_shift(biker, day)
     if shift_allows_work(shift, now):
+        cutoff = scheduled_end(shift)
+        setting, _ = DriverShiftReminderSetting.objects.get_or_create(
+            pk=1,
+            defaults={"minutes_before_close": 30},
+        )
+        lead = setting.minutes_before_close
+        if now >= cutoff - timedelta(minutes=lead):
+            interval = (
+                session.clock_intervals.filter(clocked_out_at__isnull=True)
+                .order_by("-clocked_in_at", "-pk")
+                .first()
+            )
+            if interval is None:
+                interval = DriverClockInterval.objects.create(
+                    session=session,
+                    clocked_in_at=session.start_time,
+                )
+            queue_driver_shift_notification(
+                biker=biker,
+                interval=interval,
+                cutoff=cutoff,
+                event_type="shift.closing_soon",
+            )
         return False
     local = timezone.localtime(now)
     boundary = scheduled_end(shift) if shift['is_open'] and local.time().replace(tzinfo=None) >= shift['end_time'] else now

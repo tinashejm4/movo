@@ -8,7 +8,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.transporters.models import DriverShiftException, WeeklyDriverShift
+from apps.transporters.models import (
+    DriverShiftException,
+    DriverShiftReminderSetting,
+    WeeklyDriverShift,
+)
 from apps.transporters.shift_service import reconcile_all_drivers, reconcile_driver
 from apps.users.models import Biker
 from apps.users.permissions import IsStaff
@@ -32,6 +36,26 @@ class ShiftFieldsSerializer(serializers.Serializer):
 
 class ExceptionSerializer(ShiftFieldsSerializer):
     date = serializers.DateField()
+
+
+class ReminderSettingSerializer(serializers.Serializer):
+    minutes_before_close = serializers.IntegerField(min_value=1, max_value=120)
+
+
+class DriverShiftReminderView(APIView):
+    permission_classes = [IsAuthenticated, IsStaff]
+
+    def get(self, request):
+        setting, _ = DriverShiftReminderSetting.objects.get_or_create(pk=1)
+        return Response({'minutes_before_close': setting.minutes_before_close})
+
+    def put(self, request):
+        serializer = ReminderSettingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        setting, _ = DriverShiftReminderSetting.objects.get_or_create(pk=1)
+        setting.minutes_before_close = serializer.validated_data['minutes_before_close']
+        setting.save(update_fields=['minutes_before_close'])
+        return Response({'minutes_before_close': setting.minutes_before_close})
 
 
 def shift_payload(shift):

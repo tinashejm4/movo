@@ -56,11 +56,10 @@ def deliver_notification_outbox(self, outbox_id):
             outbox.save(update_fields=["status", "attempts"])
 
         notification = outbox.notification
-        tokens = list(
-            DeviceToken.objects.filter(user=notification.user, is_active=True).values_list(
-                "token", flat=True
-            )
-        )
+        token_query = DeviceToken.objects.filter(user=notification.user, is_active=True)
+        if notification.event_type.startswith('shift.'):
+            token_query = token_query.filter(app=DeviceToken.App.BIKER)
+        tokens = list(token_query.values_list('token', flat=True))
         if tokens:
             _firebase_app()
             response = messaging.send_each_for_multicast(

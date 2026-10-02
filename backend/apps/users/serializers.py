@@ -93,3 +93,4 @@ class DriverProfileResponseSerializer(serializers.Serializer):
     phone_number = serializers.CharField(allow_blank=True, required=False)
     profile_image = serializers.CharField(allow_blank=True, required=False)
     joined_on = serializers.DateTimeField()
+    scheduled_clock_out_time = serializers.CharField(allow_null=True)

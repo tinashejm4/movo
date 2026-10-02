@@ -7,9 +7,10 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.intracity.services.package_assignment import is_biker_busy
+from apps.notifications.models import Notification
 from apps.users.models import Biker, Branch, Staff
 
-from .models import BikerDailySession, DriverClockInterval, DriverShiftException, WeeklyDriverShift
+from .models import BikerDailySession, DriverClockInterval, DriverShiftException, DriverShiftReminderSetting, WeeklyDriverShift
 from .shift_service import effective_shift, reconcile_all_drivers
 
 
@@ -115,3 +116,61 @@ class DriverShiftTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(BikerDailySession.objects.get(biker=self.biker).is_active)
         self.assertTrue(is_biker_busy(self.biker))
+
+    def test_warning_once_then_closing_alert_once(self):
+        other_user = User.objects.create_user(username='off-shift-driver')
+        Biker.objects.create(user=other_user)
+        self.client.force_authenticate(user=self.driver_user)
+        self.client.patch(self.activation, {'is_biker_activated': True})
+        self.set_time(16, 29)
+        reconcile_all_drivers()
+        self.assertFalse(Notification.objects.exists())
+        self.set_time(16, 30)
+        reconcile_all_drivers()
+        reconcile_all_drivers()
+        self.assertEqual(list(Notification.objects.values_list('event_type', flat=True)), ['shift.closing_soon'])
+        self.set_time(17)
+        reconcile_all_drivers()
+        reconcile_all_drivers()
+        self.assertEqual(
+            list(Notification.objects.order_by('id').values_list('event_type', flat=True)),
+            ['shift.closing_soon', 'shift.closed'],
+        )
+        self.assertFalse(Notification.objects.filter(user=other_user).exists())
+
+    def test_late_clock_in_manual_off_and_changed_cutoff(self):
+        self.client.force_authenticate(user=self.staff_user)
+        reminder_url = reverse('admin_driver_shift_reminder')
+        self.assertEqual(self.client.get(reminder_url).data, {'minutes_before_close': 30})
+        self.assertEqual(self.client.put(reminder_url, {'minutes_before_close': 0}).status_code, 400)
+        self.assertEqual(self.client.put(reminder_url, {'minutes_before_close': 121}).status_code, 400)
+        self.assertEqual(self.client.put(reminder_url, {'minutes_before_close': 15}).status_code, 200)
+        self.assertEqual(DriverShiftReminderSetting.objects.get(pk=1).minutes_before_close, 15)
+        self.set_time(16, 50)
+        self.client.force_authenticate(user=self.driver_user)
+        self.client.patch(self.activation, {'is_biker_activated': True})
+        reconcile_all_drivers()
+        self.assertEqual(Notification.objects.filter(event_type='shift.closing_soon').count(), 1)
+        self.client.patch(self.activation, {'is_biker_activated': False})
+        self.set_time(17)
+        reconcile_all_drivers()
+        self.assertEqual(Notification.objects.count(), 1)
+
+    def test_cutoff_edit_can_issue_new_warning_and_immediate_close_skips_warning(self):
+        self.client.force_authenticate(user=self.driver_user)
+        self.client.patch(self.activation, {'is_biker_activated': True})
+        self.set_time(16, 35)
+        reconcile_all_drivers()
+        self.client.force_authenticate(user=self.staff_user)
+        weekly_url = reverse('admin_driver_shift_detail', args=[4])
+        self.client.put(weekly_url, {'is_open': True, 'start_time': '08:00', 'end_time': '16:50'})
+        self.assertEqual(Notification.objects.filter(event_type='shift.closing_soon').count(), 2)
+        self.client.put(weekly_url, {'is_open': True, 'start_time': '08:00', 'end_time': '16:30'})
+        self.assertEqual(Notification.objects.filter(event_type='shift.closing_soon').count(), 2)
+        self.assertEqual(Notification.objects.filter(event_type='shift.closed').count(), 1)
+
+    def test_reminder_setting_requires_staff(self):
+        self.client.force_authenticate(user=self.driver_user)
+        url = reverse('admin_driver_shift_reminder')
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertEqual(self.client.put(url, {'minutes_before_close': 15}).status_code, 403)

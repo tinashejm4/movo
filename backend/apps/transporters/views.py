@@ -165,6 +165,7 @@ class TransporterView(ViewSet):
             if is_biker_activated:
                 DriverClockInterval.objects.create(session=session, clocked_in_at=now)
         if is_biker_activated and session.is_active:
+            reconcile_driver(biker, now)
             transaction.on_commit(assign_pending_packages_safely)
         return Response(
             {"is_biker_activated": is_biker_activated},

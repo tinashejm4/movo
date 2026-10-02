@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
+from django.test import override_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -222,6 +223,14 @@ class CustomerProfileEditTests(APITestCase):
         self.assertEqual(response.data["last_name"], "Moyo-Smith")
 
 
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+)
 class DriverProfileTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -255,5 +264,20 @@ class DriverProfileTests(APITestCase):
                 "phone_number": "0771234567",
                 "profile_image": "/media/profile_pics/profile_default.png",
                 "joined_on": self.biker.date_joined,
+                "scheduled_clock_out_time": "17:00",
             },
         )
+
+    def test_profile_reflects_exception_and_closed_day(self):
+        from apps.transporters.models import DriverShiftException
+
+        self.client.force_authenticate(user=self.user)
+        exception = DriverShiftException.objects.create(
+            biker=self.biker, date=timezone.localdate(), is_open=True,
+            start_time="08:00", end_time="13:00",
+        )
+        self.assertEqual(self.client.get(reverse("driver_profile")).data["scheduled_clock_out_time"], "13:00")
+        exception.is_open = False
+        exception.start_time = exception.end_time = None
+        exception.save()
+        self.assertIsNone(self.client.get(reverse("driver_profile")).data["scheduled_clock_out_time"])

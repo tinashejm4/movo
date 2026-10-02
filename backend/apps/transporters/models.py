@@ -44,3 +44,7 @@ class DriverClockInterval(models.Model):
     clocked_in_at = models.DateTimeField()
     clocked_out_at = models.DateTimeField(null=True, blank=True)
     clock_out_reason = models.CharField(max_length=10, choices=CLOCK_OUT_REASONS, null=True, blank=True)
+
+
+class DriverShiftReminderSetting(models.Model):
+    minutes_before_close = models.PositiveSmallIntegerField(default=30)
