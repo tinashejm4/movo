@@ -22,6 +22,7 @@ from ..serializers.package_serializers import (
 )
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.create_package import (
+    PackageCreationError,
     PackageCreationNotFound,
     create_package as create_package_service,
 )
@@ -226,7 +227,11 @@ class PackageViewSet(ViewSet):
 
         packages = (
             Package.objects.select_related(
-                "sender__user", "receiver__user", "city", "biker__user"
+                "sender__user",
+                "receiver__user",
+                "city",
+                "biker__user__contact",
+                "invoice",
             )
             .annotate(current_status=Subquery(latest_status))
             .filter(
@@ -385,6 +390,11 @@ class PackageViewSet(ViewSet):
                 {"error": str(exc)},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        except PackageCreationError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Automatic dispatch runs after the package-creation transaction commits.
         # It updates a different Package instance, so reload before serializing the
@@ -418,12 +428,14 @@ class PackageViewSet(ViewSet):
         status_map = {}
         for status_record in status_records:
             status_map.setdefault(status_record.status, status_record.updated_at)
-            logger.warning("Status: %s, Updated At: %s", status_record.status, status_record.updated_at)
 
         delivered_at = package.delivered_at or status_map.get("Delivered")
         collected_at = status_map.get("In Transit")
         cancelled_at = status_map.get("Cancelled")
         assigned_at = status_map.get("Assigned")
+        latest_status = status_records[-1] if status_records else None
+        current_status = latest_status.status if latest_status else "Pending"
+        invoice = getattr(package, "invoice", None)
 
         serializer = PackageListRequestSerializer(
             {
@@ -432,20 +444,38 @@ class PackageViewSet(ViewSet):
                 "confirmation_code": package_confirmation_code_for_user(
                     package,
                     requester_user_id,
-                    current_status=(
-                        status_records[-1].status if status_records else "Pending"
-                    ),
+                    current_status=current_status,
                 ),
                 "pickup_address": package.pickup_address,
                 "dropoff_address": package.dropoff_address,
-                "collected_at": collected_at,
-                "delivered_at": delivered_at,
-                "assigned_at": assigned_at,
                 "slug": package.slug,
                 "is_incoming": package_is_incoming_for_user(
                     package, requester_user_id
                 ),
                 "package_created_at": package.added_at,
+                "status": {
+                    "driver_number": (
+                        self.get_phone_number(package.biker.user)
+                        if package.biker
+                        else None
+                    ),
+                    "status": current_status,
+                    "status_updated_at": (
+                        latest_status.updated_at if latest_status else None
+                    ),
+                    "is_active": current_status in self.ACTIVE_PACKAGE_STATUSES,
+                    "assigned_at": assigned_at,
+                    "is_collected": collected_at is not None or delivered_at is not None,
+                    "collected_at": collected_at,
+                    "is_cancelled": cancelled_at is not None,
+                    "cancelled_at": cancelled_at,
+                    "can_cancel": can_cancel_package(
+                        invoice=invoice,
+                        current_status=current_status,
+                    ),
+                    "is_delivered": delivered_at is not None,
+                    "delivered_at": delivered_at,
+                },
             }
         )
         return serializer.data
@@ -728,7 +758,12 @@ class PackageViewSet(ViewSet):
             .values("status")[:1]
         )
         current_packages = (
-            Package.objects.select_related("sender__user", "receiver__user")
+            Package.objects.select_related(
+                "sender__user",
+                "receiver__user",
+                "biker__user__contact",
+                "invoice",
+            )
             .filter(
                 Q(sender=customer) | Q(receiver=customer),
                 added_at__date=timezone.localdate(),

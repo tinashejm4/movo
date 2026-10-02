@@ -19,8 +19,13 @@ if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ] && [ "$D
     --email "$DJANGO_SUPERUSER_EMAIL" || true
 fi
 
-# echo "Starting: $*"
-# exec "$@"
+# The worker service supplies a Celery command through Docker Compose.  Do not
+# replace it with the web server below, or queued jobs (including FCM delivery)
+# will never be consumed.
+if [ "$1" = "celery" ]; then
+  echo "Starting: $*"
+  exec "$@"
+fi
 
 
 if [ "$DEBUG" = "0" ] ; then

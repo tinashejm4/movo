@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -130,10 +131,97 @@ class IntracityPackageListTests(APITestCase):
         self.assertFalse(result["is_incoming"])
         self.assertNotIn("incoming", result)
         self.assertIn("package_created_at", result)
-        self.assertIn("collected_at", result)
-        self.assertIn("delivered_at", result)
-        self.assertNotIn("driver_number", result)
-        self.assertNotIn("can_cancel", result)
+        self.assertNotIn("assigned_at", result)
+        self.assertNotIn("collected_at", result)
+        self.assertNotIn("delivered_at", result)
+        self.assertEqual(result["status"]["driver_number"], "0779000013")
+        self.assertEqual(result["status"]["status"], "Pending")
+        self.assertIsNotNone(result["status"]["status_updated_at"])
+        self.assertTrue(result["status"]["is_active"])
+        self.assertIsNone(result["status"]["assigned_at"])
+        self.assertFalse(result["status"]["is_collected"])
+        self.assertFalse(result["status"]["is_cancelled"])
+        self.assertTrue(result["status"]["can_cancel"])
+        self.assertFalse(result["status"]["is_delivered"])
+
+    def test_package_list_nests_cancelled_status_fields(self):
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="111111",
+            receiver_code="222222",
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+        cancelled_status = PackageStatus.objects.create(
+            package=package,
+            status="Cancelled",
+        )
+
+        response = self.client.get(reverse("intracity_package_list"))
+
+        status_payload = response.data["results"][0]["status"]
+        self.assertEqual(status_payload["status"], "Cancelled")
+        self.assertEqual(
+            parse_datetime(status_payload["status_updated_at"]),
+            cancelled_status.updated_at,
+        )
+        self.assertFalse(status_payload["is_active"])
+        self.assertTrue(status_payload["is_cancelled"])
+        self.assertEqual(
+            parse_datetime(status_payload["cancelled_at"]),
+            cancelled_status.updated_at,
+        )
+        self.assertFalse(status_payload["can_cancel"])
+
+    def test_package_list_nests_assignment_collection_and_delivery_times(self):
+        delivered_at = timezone.now()
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            biker=self.driver,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="111111",
+            receiver_code="222222",
+            delivered_at=delivered_at,
+        )
+        PackageStatus.objects.create(package=package, status="Pending")
+        assigned_status = PackageStatus.objects.create(
+            package=package, status="Assigned"
+        )
+        transit_status = PackageStatus.objects.create(
+            package=package, status="In Transit"
+        )
+        delivered_status = PackageStatus.objects.create(
+            package=package, status="Delivered"
+        )
+
+        response = self.client.get(reverse("intracity_package_list"))
+
+        status_payload = response.data["results"][0]["status"]
+        self.assertEqual(status_payload["status"], "Delivered")
+        self.assertEqual(
+            parse_datetime(status_payload["assigned_at"]),
+            assigned_status.updated_at,
+        )
+        self.assertEqual(
+            parse_datetime(status_payload["collected_at"]),
+            transit_status.updated_at,
+        )
+        self.assertEqual(
+            parse_datetime(status_payload["delivered_at"]),
+            delivered_at,
+        )
+        self.assertEqual(
+            parse_datetime(status_payload["status_updated_at"]),
+            delivered_status.updated_at,
+        )
+        self.assertTrue(status_payload["is_collected"])
+        self.assertTrue(status_payload["is_delivered"])
 
     def test_package_list_direction_is_relative_to_requesting_user(self):
         package = Package.objects.create(
