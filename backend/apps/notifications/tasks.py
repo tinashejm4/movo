@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _firebase_app():
-    """Initialize Firebase Admin once, from a mounted file or JSON secret."""
+    """Initialize Firebase Admin once from a secret or ambient cloud identity."""
     from firebase_admin import get_app
 
     try:
@@ -26,9 +26,9 @@ def _firebase_app():
         elif credentials_json:
             credential = credentials.Certificate(json.loads(credentials_json))
         else:
-            raise RuntimeError(
-                "Set FIREBASE_CREDENTIALS_PATH or FIREBASE_CREDENTIALS_JSON for FCM delivery"
-            )
+            # Cloud Run supplies Application Default Credentials through the
+            # attached service account, so no exported JSON key is needed.
+            credential = credentials.ApplicationDefault()
         return initialize_app(credential)
 
 
