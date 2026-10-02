@@ -21,6 +21,7 @@ from apps.adminportal.views.bikers_views import (
 )
 
 from .views.delivery_order_views import DeliveryPageView
+from .views.driver_shift_views import WeeklyShiftsView, WeeklyShiftDetailView, DriverExceptionsView, DriverExceptionDetailView
 
 delivery_metrics = DeliveryPageView.as_view({"get": "delivery_metrics"})
 delivery_order_list = DeliveryPageView.as_view({"get": "delivery_order_list"})
@@ -28,6 +29,10 @@ today_delivery_metrics = DeliveryPageView.as_view({"get": "today_delivery_metric
 
 
 urlpatterns = [
+    path("driver-shifts/", WeeklyShiftsView.as_view(), name="admin_driver_shifts"),
+    path("driver-shifts/<int:weekday>/", WeeklyShiftDetailView.as_view(), name="admin_driver_shift_detail"),
+    path("bikers/<int:biker_user_id>/shift-exceptions/", DriverExceptionsView.as_view(), name="admin_driver_shift_exceptions"),
+    path("bikers/<int:biker_user_id>/shift-exceptions/<str:day>/", DriverExceptionDetailView.as_view(), name="admin_driver_shift_exception_detail"),
     path("delivery_metrics/", delivery_metrics, name="admin_delivery_metrics"),
     path("deliveries/", delivery_order_list, name="admin_delivery_order_list"),
     path("deliveries/today/", today_delivery_metrics, name="admin_today_delivery_metrics"),

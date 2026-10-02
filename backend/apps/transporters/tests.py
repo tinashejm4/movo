@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.contrib.auth.models import User
 from django.urls import reverse
@@ -12,7 +12,7 @@ from apps.bookkeeping.models import Account, IntracitySale
 from apps.intracity.models import Invoice, Package, PackageStatus
 from apps.users.models import Biker, City, Customer, Suburb
 
-from .models import BikerDailySession
+from .models import BikerDailySession, WeeklyDriverShift
 from .services import free_drivers_and_close_packages
 
 
@@ -134,6 +134,7 @@ class FreeDriversTestEndpointTests(APITestCase):
 
 class BikerDailySessionEndpointTests(APITestCase):
     def setUp(self):
+        WeeklyDriverShift.objects.update(start_time=time.min, end_time=time.max)
         self.user = User.objects.create_user(
             username="session-driver",
             password="Pass@123",

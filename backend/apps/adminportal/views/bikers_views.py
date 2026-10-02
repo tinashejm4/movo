@@ -8,6 +8,8 @@ from apps.users.models import Biker, Contact, NextOfKin, ProfileImage, Identific
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.utils import timezone
+from apps.transporters.shift_service import effective_shift
 
 
 class BikersListView(APIView):
@@ -56,6 +58,7 @@ class BikerDetailView(APIView):
             "id_number": identification.id_number if identification else None,
             "licence_picture": licence.licence_image.url if licence else None,
             "licence_number": licence.licence_number if licence else None,
+            "effective_shift": effective_shift(biker, timezone.localdate()),
         }
         return Response(data, status=status.HTTP_200_OK)
 

@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from datetime import timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
@@ -10,7 +10,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.users.models import Biker, City, Customer, Suburb
-from apps.transporters.models import BikerDailySession
+from apps.transporters.models import BikerDailySession, WeeklyDriverShift
 
 from ..models import Package, PackageStatus
 from ..services.package_assignment import assign_pending_packages, is_biker_busy
@@ -18,6 +18,7 @@ from ..services.package_assignment import assign_pending_packages, is_biker_busy
 
 class AutomaticPackageAssignmentTests(APITestCase):
     def setUp(self):
+        WeeklyDriverShift.objects.update(start_time=time.min, end_time=time.max)
         self.city = City.objects.create(
             name="Harare",
             province="Harare",

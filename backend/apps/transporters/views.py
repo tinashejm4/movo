@@ -22,6 +22,8 @@ from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from apps.users.models import Contact, ProfileImage
 from apps.notifications.services import queue_package_customer_notification
 from .models import BikerDailySession
+from .models import DriverClockInterval
+from .shift_service import clock_out, effective_shift, reconcile_driver, shift_allows_work
 from .services import (
     CashConfirmationError,
     confirm_cash_received,
@@ -102,6 +104,7 @@ class TransporterView(ViewSet):
         },
     )
     def get_daily_session(self, request):
+        reconcile_driver(request.user.biker)
         session = BikerDailySession.objects.filter(
             biker__user=request.user,
             date=timezone.localdate(),
@@ -132,21 +135,36 @@ class TransporterView(ViewSet):
         serializer = ActivateDeactivateRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         is_biker_activated = serializer.validated_data.get("is_biker_activated")
+        now = timezone.now()
+        biker = request.user.biker
+        reconcile_driver(biker, now)
+        if is_biker_activated and not shift_allows_work(effective_shift(biker, timezone.localdate(now)), now):
+            return Response(
+                {"detail": "Driver activation is outside scheduled working hours."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         # Update the biker's daily session status
-        session = BikerDailySession.objects.filter(
+        session = BikerDailySession.objects.select_for_update().filter(
             biker__user=request.user, date=timezone.localdate()
         ).first()
         if session:
-            session.is_active = is_biker_activated
-            session.save()
+            if is_biker_activated and not session.is_active:
+                session.is_active = True
+                session.end_time = None
+                session.save(update_fields=['is_active', 'end_time'])
+                DriverClockInterval.objects.create(session=session, clocked_in_at=now)
+            elif not is_biker_activated:
+                clock_out(session, now=now, reason=DriverClockInterval.MANUAL)
         else:
-            BikerDailySession.objects.create(
-                biker=request.user.biker,
+            session = BikerDailySession.objects.create(
+                biker=biker,
                 date=timezone.localdate(),
-                start_time=timezone.now(),
+                start_time=now,
                 is_active=is_biker_activated,
             )
-        if is_biker_activated:
+            if is_biker_activated:
+                DriverClockInterval.objects.create(session=session, clocked_in_at=now)
+        if is_biker_activated and session.is_active:
             transaction.on_commit(assign_pending_packages_safely)
         return Response(
             {"is_biker_activated": is_biker_activated},
