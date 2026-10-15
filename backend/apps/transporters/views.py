@@ -705,8 +705,8 @@ class TransporterView(ViewSet):
                     invoice__payment_method="Cash",
                 )
             ),
-            comment=f"End of day cash transfer. Date {timezone.localdate()}",
-            accepted_by=request.user,
+            description=f"End of day cash transfer. Date {timezone.localdate()}",
+            approved_by=request.user,
         )
 
         return Response(

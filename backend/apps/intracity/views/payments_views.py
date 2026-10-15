@@ -293,7 +293,6 @@ class PaymentViewSet(ViewSet):
                 invoice=invoice,
                 defaults={
                     "account": Account.objects.get(name="FBC", currency="USD"),
-                    "amount": invoice.amount,
                 },
             )
 

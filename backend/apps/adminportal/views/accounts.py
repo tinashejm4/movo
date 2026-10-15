@@ -5,7 +5,7 @@ from rest_framework import status
 from apps.users.permissions import IsStaff
 from datetime import datetime
 from apps.users.models import Biker, Contact, NextOfKin, ProfileImage, Identification, Licence, Branch
-from apps.bookkeeping.models import Account, AccountBalance, ExpenseAccount, IntracitySale, Expense, Charge, FundsTransfer, Receipt
+from apps.bookkeeping.models import Account, ExpenseAccount, IntracitySale, Expense, Charge, FundsTransfer, LedgerEntry, Receipt
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.db import transaction
@@ -47,16 +47,12 @@ class AccountTransactionsView(APIView):
             end_date = datetime.strptime(end_date, "%Y-%m-%d")
 
         account = get_object_or_404(Account, id=account_id)
-        intracity_sales = IntracitySale.objects.filter(account=account)
-        expenses = Expense.objects.filter(account=account)
-        funds_transfers = FundsTransfer.objects.filter((Q(from_account=account) | Q(to_account=account)))
-        charges = Charge.objects.filter(account=account)
+        transactions = LedgerEntry.objects.filter(account=account).select_related(
+            "intracity_sale", "expense", "charge", "transfer_out", "transfer_in"
+        )
 
         if start_date and end_date:
-            intracity_sales = intracity_sales.filter(added_at__date__range=[start_date, end_date])
-            funds_transfers = funds_transfers.filter(added_at__date__range=[start_date, end_date])
-            charges = charges.filter(added_at__date__range=[start_date, end_date])
-            expenses = expenses.filter(added_at__date__range=[start_date, end_date])
+            transactions = transactions.filter(actual_date__date__range=[start_date, end_date])
             
         context = {
             "account_details":{
@@ -67,42 +63,17 @@ class AccountTransactionsView(APIView):
                 "currency": account.currency,
                 "description": account.description,
                 "number": account.number,
-                "current_balance": account.get_balance(at_date=end_date),
+                "current_balance": account.get_balance(),
             },
             "transactions": [{
-                "type": "Sales",
+                "entry_type": transaction.entry_type,
                 "id": transaction.id,
                 "amount": transaction.amount,
-                "balance": transaction.running_balance.running_balance if transaction.running_balance else 0,
+                "balance": transaction.running_balance,
                 "description": transaction.description,
-                "date": transaction.added_at,
-                "transaction_type": "credit"
-            } for transaction in intracity_sales] + [{
-                "type": "Expense",
-                "id": transaction.id,
-                "amount": transaction.amount,
-                "balance": transaction.running_balance.running_balance if transaction.running_balance else 0,
-                "description": transaction.description,
-                "date": transaction.added_at,
-                "transaction_type": "debit"
-            } for transaction in expenses] + [{
-                "type": "Funds Transfer",
-                "id": transaction.id,
-                "amount": transaction.amount,
-                #funds transfer does not have running_balance. there is to_account_running_balance and from_account_running_balance. fix if needed
-                "balance": transaction.from_account_running_balance.running_balance if account == transaction.from_account else transaction.to_account_running_balance.running_balance,
-                "description": transaction.description,
-                "date": transaction.added_at,
-                "transaction_type": "debit" if account == transaction.from_account else "credit"
-            } for transaction in funds_transfers] + [{
-                "type": "Charge",
-                "id": transaction.id,
-                "amount": transaction.amount,
-                "balance": transaction.running_balance.running_balance if transaction.running_balance else 0,
-                "description": transaction.description,
-                "date": transaction.added_at,
-                "transaction_type": "debit"
-            } for transaction in charges]
+                "date": transaction.actual_date,
+                "transaction_type": transaction.transaction_type
+            } for transaction in transactions]
         }
         return Response(
             context,
@@ -189,6 +160,9 @@ class CreateFundsTransferView(APIView):
 
         from_account = Account.objects.get(id=from_account_id)
         to_account = Account.objects.get(id=to_account_id)
+
+        if float(amount) <= 0:
+            return Response({"error": "Transfer amount must be greater than zero"}, status=status.HTTP_400_BAD_REQUEST)
 
         if from_account.get_balance() < float(amount):
             return Response({"error": "Insufficient funds in the source account"}, status=status.HTTP_400_BAD_REQUEST)

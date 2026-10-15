@@ -70,7 +70,7 @@ class PackageStatus(models.Model):
     updated_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.status} - {self.package.pk}"
+        return f"{self.status} - {self.package.slug}"
 
 
 class Invoice(models.Model):

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Account, AccountBalance, IntracitySale, ExpenseAccount, Expense, FundsTransfer, Charge, EndOfDayBalance, ExchangeRate
+from .models import Account, IntracitySale, ExpenseAccount, Expense, FundsTransfer, Charge, EndOfDayBalance, ExchangeRate, LedgerEntry
 
 
 admin.site.register([Account, 
@@ -10,5 +10,6 @@ admin.site.register([Account,
                      Charge, 
                      EndOfDayBalance, 
                      ExchangeRate,
-                     AccountBalance])
+                     LedgerEntry
+                     ])
 
