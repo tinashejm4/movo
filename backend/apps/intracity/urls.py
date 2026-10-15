@@ -26,7 +26,9 @@ ecocash_payment = PaymentViewSet.as_view({"post": "ecocash_payment"})
 ecocash_notify = PaymentViewSet.as_view({"post": "ecocash_notify"})
 paynow_payment = PaymentViewSet.as_view({"post": "paynow_payment"})
 paynow_notify = PaymentViewSet.as_view({"get": "paynow_notify"})
-
+package_images = PackageViewSet.as_view(
+    {"get": "get_package_images", "post": "post_package_image"}
+)
 
 
 urlpatterns = [
@@ -35,31 +37,21 @@ urlpatterns = [
         sender_receiver_login,
         name="intracity_sender_receiver_login",
     ),
-    path("create-package/", 
-         package_create, 
-         name="intracity_create_package"
-         ),
-    path("invoice-details/", 
-         invoice_details, 
-         name="intracity_invoice_details"
-         ),
-    path("package/", 
-         package_detail, 
-         name="intracity_package_detail"
-         ),
+    path("create-package/", package_create, name="intracity_create_package"),
+    path("invoice-details/", invoice_details, name="intracity_invoice_details"),
+    path("package/", package_detail, name="intracity_package_detail"),
     path(
         "package-status/",
         package_status,
         name="intracity_package_status",
     ),
-    path("calculate-price/", 
-         package_price, 
-         name="intracity_package_price"
-         ),
-    path("packages/", 
-         package_list, 
-         name="intracity_package_list"
-         ),
+    path("calculate-price/", package_price, name="intracity_package_price"),
+    path("packages/", package_list, name="intracity_package_list"),
+    path(
+        "package-images/<int:package_id>/",
+        package_images,
+        name="intracity_package_images",
+    ),
     path(
         "is-biker-assigned/",
         is_biker_assigned,
@@ -70,14 +62,8 @@ urlpatterns = [
         assign_pending_packages,
         name="intracity_assign_pending_packages",
     ),
-    path("cancel-order/", 
-         cancel_order, 
-         name="intracity_cancel_order"
-         ),
-    path("search-suburbs/", 
-         search_suburb, 
-         name="intracity_search_suburb"
-         ),
+    path("cancel-order/", cancel_order, name="intracity_cancel_order"),
+    path("search-suburbs/", search_suburb, name="intracity_search_suburb"),
     path(
         "ecocash-payment/",
         ecocash_payment,

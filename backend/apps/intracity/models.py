@@ -72,6 +72,13 @@ class PackageStatus(models.Model):
     def __str__(self):
         return f"{self.status} - {self.package.pk}"
 
+class PackageImage(models.Model):
+    package = models.ForeignKey(Package, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField(upload_to="package_images/")
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Image for Package {self.package.slug}"
 
 class Invoice(models.Model):
     payment_methods = [

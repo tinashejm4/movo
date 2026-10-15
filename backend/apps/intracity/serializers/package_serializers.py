@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from ..models import PackageImage
+
 
 
 class ErrorResponseSerializer(serializers.Serializer):
@@ -150,3 +152,9 @@ class SuburbSearchItemSerializer(serializers.Serializer):
 
 class SuburbSearchResponseSerializer(serializers.Serializer):
     suburbs = SuburbSearchItemSerializer(many=True)
+
+class PackageImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PackageImage
+        fields = ["id", "package", "image", "uploaded_at"]
+        read_only_fields = ["id", "package", "uploaded_at"]

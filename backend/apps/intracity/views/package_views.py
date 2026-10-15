@@ -13,6 +13,7 @@ from ..serializers.package_serializers import (
     ErrorResponseSerializer,
     PackageDetailQuerySerializer,
     PackageDetailSerializer,
+    PackageImageSerializer,
     PackageListSerializer,
     PackageCreateSerializer,
     PackagePriceRequestSerializer,
@@ -20,7 +21,7 @@ from ..serializers.package_serializers import (
     SuburbSearchResponseSerializer,
     PackageListRequestSerializer,
 )
-from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
+from ..models import Package, PackageImage, PackageStatus, Invoice, SuburbSearchLog
 from ..services.create_package import (
     PackageCreationError,
     PackageCreationNotFound,
@@ -802,3 +803,42 @@ class PackageViewSet(ViewSet):
         ]
 
         return Response({"packages": response_data}, status=status.HTTP_200_OK)
+
+    def _image_package_for_user(self, request, package_id):
+        package = Package.objects.select_related(
+            "sender", "receiver", "biker"
+        ).filter(id=package_id).first()
+        if not package:
+            return Response(
+                {"error": "Package not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not request.user.is_staff and request.user.id not in {
+            package.sender.user_id,
+            package.receiver.user_id,
+            package.biker.user_id if package.biker else None,
+        }:
+            return Response(
+                {"error": "You do not have access to this package"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return package
+
+    def get_package_images(self, request, package_id):
+        package = self._image_package_for_user(request, package_id)
+        if isinstance(package, Response):
+            return package
+
+        images = PackageImage.objects.filter(package=package).order_by("uploaded_at", "id")
+        serializer = PackageImageSerializer(images, many=True)
+        return Response({"images": serializer.data}, status=status.HTTP_200_OK)
+
+    def post_package_image(self, request, package_id):
+        package = self._image_package_for_user(request, package_id)
+        if isinstance(package, Response):
+            return package
+
+        serializer = PackageImageSerializer(data={"image": request.FILES.get("image")})
+        serializer.is_valid(raise_exception=True)
+        serializer.save(package=package)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)

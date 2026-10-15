@@ -18,9 +18,9 @@ class StaffLoginRequestSerializer(serializers.Serializer):
 
 
 class StaffProfileResponseSerializer(serializers.Serializer):
-    staff_id = serializers.IntegerField()
-    branch_id = serializers.IntegerField()
-    branch_name = serializers.CharField()
+    staff_id = serializers.IntegerField(allow_null=True)
+    branch_id = serializers.IntegerField(allow_null=True)
+    branch_name = serializers.CharField(allow_null=True)
 
 
 class TokenRefreshRequestSerializer(serializers.Serializer):

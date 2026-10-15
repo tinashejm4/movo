@@ -8,7 +8,57 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Biker, City, Contact, Customer, OTP, ProfileImage, Suburb
+from .models import Biker, Branch, City, Contact, Customer, OTP, ProfileImage, Staff, Suburb
+
+
+class StaffAccessTests(APITestCase):
+    def test_superuser_without_staff_row_can_log_in_and_read_profile(self):
+        user = User.objects.create_superuser(
+            username="erp-superuser", password="Pass@123"
+        )
+
+        login = self.client.post(
+            reverse("staff_token_obtain_pair"),
+            {"username": user.username, "password": "Pass@123"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        profile = self.client.get(reverse("staff_profile"))
+        self.assertEqual(profile.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            profile.data,
+            {"staff_id": None, "branch_id": None, "branch_name": None},
+        )
+        self.assertEqual(
+            self.client.get(reverse("admin_delivery_metrics")).status_code,
+            status.HTTP_200_OK,
+        )
+
+    def test_django_staff_flag_alone_does_not_grant_erp_access(self):
+        user = User.objects.create_user(
+            username="admin-site-only", password="Pass@123", is_staff=True
+        )
+        self.client.force_authenticate(user=user)
+
+        self.assertEqual(
+            self.client.get(reverse("staff_profile")).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_branch_staff_profile_is_unchanged(self):
+        user = User.objects.create_user(username="branch-staff", password="Pass@123")
+        branch = Branch.objects.create(name="Harare", address="Main street")
+        staff = Staff.objects.create(user=user, branch=branch, position="Manager")
+        self.client.force_authenticate(user=user)
+
+        profile = self.client.get(reverse("staff_profile"))
+        self.assertEqual(profile.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            profile.data,
+            {"staff_id": staff.id, "branch_id": branch.id, "branch_name": branch.name},
+        )
 
 
 class SuburbViewSetTests(APITestCase):

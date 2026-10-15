@@ -103,6 +103,11 @@ class StaffProfileView(APIView):
         try:
             staff = Staff.objects.select_related("branch").get(user=request.user)
         except Staff.DoesNotExist:
+            if request.user.is_superuser:
+                return Response(
+                    {"staff_id": None, "branch_id": None, "branch_name": None},
+                    status=status.HTTP_200_OK,
+                )
             return Response(
                 {"error": "Staff profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
