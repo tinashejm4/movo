@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="160" viewBox="0 0 640 160" role="img" aria-labelledby="movoTitle movoDesc">
+  <title id="movoTitle">MOVO logo</title>
+  <desc id="movoDesc">Orange MOVO wordmark.</desc>
+  <text
+    x="8"
+    y="124"
+    fill="#ff6a00"
+    font-family="Arial Black, Arial, Helvetica, sans-serif"
+    font-size="160"
+    font-style="italic"
+    font-weight="900"
+    letter-spacing="2"
+  >
+    MOVO
+  </text>
+</svg>

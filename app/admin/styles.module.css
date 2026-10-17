@@ -1,0 +1,72 @@
+.page { min-height: 100vh; padding: 40px clamp(20px, 5vw, 72px) 64px; background: #f8fafc; color: #0f172a; }
+.header, .sectionHeader, .bikerHeader { display: flex; align-items: center; }
+.header { justify-content: space-between; gap: 24px; margin-bottom: 36px; }
+.eyebrow, .sectionLabel { margin: 0 0 6px; color: #c2410c; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.header h1, .section h2, .bikerCard h3 { margin: 0; }
+.header h1 { font-size: clamp(1.8rem, 4vw, 2.5rem); letter-spacing: -0.03em; }
+.intro { margin: 8px 0 0; color: #64748b; }
+.updated, .loading, .count { margin: 0; color: #64748b; font-size: 0.82rem; font-weight: 700; }
+.section { margin-top: 32px; }
+.sectionHeader { justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.section h2 { font-size: 1.35rem; }
+.metricGrid, .bikerGrid { display: grid; gap: 14px; }
+.metricGrid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.metricCard, .bikerCard { border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; }
+.metricCard { min-height: 124px; padding: 20px; }
+.metricCard p { margin: 0 0 18px; color: #64748b; font-size: 0.82rem; font-weight: 700; }
+.metricCard strong { color: #9a3412; font-size: 2rem; line-height: 1; }
+.bikerGrid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.bikerCard { padding: 20px; }
+.bikerHeader { justify-content: space-between; align-items: flex-start; gap: 12px; }
+.bikerCard h3 { font-size: 1rem; }
+.startedAt { margin: 5px 0 0; color: #64748b; font-size: 0.8rem; }
+.statusBadge { padding: 5px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 800; }
+.active { background: #dcfce7; color: #166534; }
+.offline { background: #f1f5f9; color: #64748b; }
+.bikerStatus { display: flex; align-items: center; gap: 7px; margin: 22px 0; color: #475569; font-size: 0.85rem; font-weight: 700; }
+.readyDot, .busyDot { width: 8px; height: 8px; border-radius: 50%; }
+.readyDot { background: #16a34a; }
+.busyDot { background: #f59e0b; }
+.bikerStats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; padding-top: 16px; border-top: 1px solid #f1f5f9; }
+.bikerStats div { display: grid; gap: 5px; }
+.bikerStats dt { color: #64748b; font-size: 0.75rem; }
+.bikerStats dd { margin: 0; color: #0f172a; font-size: 1.2rem; font-weight: 800; }
+.error { margin: 0 0 20px; color: #b91c1c; font-weight: 700; }
+.empty { padding: 28px; border: 1px dashed #cbd5e1; border-radius: 8px; color: #64748b; text-align: center; }
+.packageList { display: grid; gap: 8px; }
+.packageRow { border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; }
+.packageMain { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.5fr) auto auto; align-items: center; gap: 20px; padding: 16px 20px; }
+.packageIdentity { display: grid; gap: 7px; min-width: 0; }
+.packageIdentity > div:first-child { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.packageIdentity strong { overflow: hidden; color: #0f172a; text-overflow: ellipsis; white-space: nowrap; }
+.packageIdentity > div:first-child > span { color: #94a3b8; font-size: 0.78rem; white-space: nowrap; }
+.packageMeta { display: flex; flex-wrap: wrap; gap: 6px; color: #64748b; font-size: 0.72rem; }
+.packageMeta span { padding: 3px 6px; border-radius: 4px; background: #f8fafc; white-space: nowrap; }
+.route { display: flex; align-items: center; gap: 10px; min-width: 0; color: #475569; font-size: 0.86rem; }
+.route span:not(.routeArrow) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.routeArrow { color: #c2410c; font-weight: 800; }
+.packageStatus { padding: 6px 10px; border-radius: 999px; background: #fff7ed; color: #9a3412; font-size: 0.75rem; font-weight: 800; white-space: nowrap; }
+.packageToggle { display: inline-grid; width: 32px; height: 32px; place-items: center; border: 0; background: transparent; color: #9a3412; font-size: 1.35rem; line-height: 1; cursor: pointer; }
+.packageToggle:hover { color: #c2410c; }
+.packageToggleExpanded { transform: rotate(90deg); }
+.packageDetails { padding: 0 20px 20px; border-top: 1px solid #f1f5f9; }
+.packageDetailGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; margin: 0; padding-top: 18px; }
+.packageDetailGrid div { display: grid; gap: 5px; }
+.packageDetailGrid dt { color: #64748b; font-size: 0.75rem; font-weight: 700; }
+.packageDetailGrid dd { margin: 0; color: #0f172a; font-size: 0.86rem; }
+.detailLoading, .detailError { margin: 18px 0 0; color: #64748b; font-size: 0.85rem; }
+.detailError { color: #b91c1c; font-weight: 700; }
+.statusHistory { margin-top: 22px; padding-top: 18px; border-top: 1px solid #f1f5f9; }
+.statusHistory h4 { margin: 0 0 16px; color: #475569; font-size: 0.85rem; }
+.statusTimeline { position: relative; display: grid; gap: 16px; margin: 0; padding: 0 0 0 4px; list-style: none; }
+.statusTimeline::before { position: absolute; top: 8px; bottom: 8px; left: 8px; width: 1px; background: #cbd5e1; content: ""; }
+.statusTimelineItem { position: relative; display: flex; align-items: flex-start; gap: 14px; }
+.statusTimelineDot { z-index: 1; flex: 0 0 9px; width: 9px; height: 9px; margin-top: 4px; border: 2px solid #ffffff; border-radius: 50%; background: #94a3b8; box-shadow: 0 0 0 1px #cbd5e1; }
+.currentStatusDot { background: #c2410c; box-shadow: 0 0 0 1px #c2410c; }
+.statusTimelineItem div { display: grid; gap: 3px; }
+.statusTimelineItem strong { color: #0f172a; font-size: 0.86rem; }
+.statusTimelineItem time { color: #64748b; font-size: 0.76rem; }
+.noStatusHistory { margin: 0; color: #64748b; font-size: 0.82rem; }
+@media (max-width: 1000px) { .metricGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .packageMain { grid-template-columns: 1fr auto; gap: 10px 14px; } .route { grid-column: 1 / -1; grid-row: 2; } .packageStatus { justify-self: start; } .packageToggle { grid-column: 2; grid-row: 1; } .packageDetailGrid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .page { padding-top: 28px; } .header { align-items: flex-start; flex-direction: column; margin-bottom: 28px; } .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metricCard { min-height: 110px; padding: 16px; } }

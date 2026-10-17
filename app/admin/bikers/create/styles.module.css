@@ -1,0 +1,34 @@
+.page { min-height: 100vh; padding: 40px clamp(20px, 5vw, 72px); background: #f8fafc; color: #0f172a; }
+.header { margin-bottom: 32px; }
+.backLink { display: inline-block; margin-bottom: 28px; color: #c2410c; font-size: 0.9rem; font-weight: 700; text-decoration: none; }
+.backLink:hover { text-decoration: underline; }
+.eyebrow { margin: 0 0 6px; color: #64748b; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; }
+.page h1, .page h2 { margin: 0; }
+.page h1 { font-size: 2rem; }
+.intro { margin: 8px 0 0; color: #64748b; }
+.panel { min-height: 240px; padding: clamp(20px, 3vw, 32px); border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; }
+.panel h2 { font-size: 1.2rem; }
+.formHeader { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.formHeader span { color: #64748b; font-size: 0.9rem; }
+.stepNav { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 28px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+.stepNav button { padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: #64748b; font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+.stepNav button:hover, .stepNav .activeStep { background: #fff7ed; color: #9a3412; }
+.section h3 { margin: 0 0 20px; font-size: 1rem; }
+.fieldGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.fieldGrid label { display: grid; gap: 7px; color: #334155; font-size: 0.9rem; font-weight: 700; }
+.fieldGrid input, .fieldGrid select, .fieldGrid textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 5px; background: #ffffff; color: #0f172a; font: inherit; font-weight: 400; }
+.fieldGrid textarea { resize: vertical; }
+.fieldGrid input:focus, .fieldGrid select:focus, .fieldGrid textarea:focus { outline: 2px solid #fdba74; outline-offset: 1px; border-color: #f97316; }
+.fullField { grid-column: 1 / -1; }
+.formActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 32px; }
+.formActions button { padding: 10px 14px; border: 1px solid #c2410c; border-radius: 6px; background: #c2410c; color: #ffffff; font: inherit; font-weight: 700; cursor: pointer; }
+.formActions button:hover:not(:disabled) { background: #9a3412; }
+.formActions .secondaryButton { background: #ffffff; color: #9a3412; }
+.formActions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.error { margin: 0 0 18px; color: #b91c1c; font-weight: 600; }
+
+@media (max-width: 640px) {
+	.fieldGrid { grid-template-columns: 1fr; }
+	.fullField { grid-column: auto; }
+	.formActions { justify-content: space-between; }
+}

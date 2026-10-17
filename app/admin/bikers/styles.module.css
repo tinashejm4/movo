@@ -1,0 +1,45 @@
+.page { min-height: 100vh; padding: 40px clamp(20px, 5vw, 72px); background: #f8fafc; color: #0f172a; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
+.backLink { display: inline-block; margin-bottom: 28px; color: #c2410c; font-size: 0.9rem; font-weight: 700; text-decoration: none; }
+.backLink:hover { text-decoration: underline; }
+.eyebrow { margin: 0 0 6px; color: #64748b; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; }
+.page h1, .page h2 { margin: 0; }
+.page h1 { font-size: 2rem; }
+.intro { margin: 8px 0 0; color: #64748b; }
+.createButton { flex: 0 0 auto; margin-top: 2px; padding: 10px 14px; border-radius: 6px; background: #c2410c; color: #ffffff; font-size: 0.9rem; font-weight: 700; text-decoration: none; }
+.createButton:hover { background: #9a3412; }
+.workspace { display: grid; grid-template-columns: minmax(260px, 0.8fr) minmax(0, 2fr); min-height: 520px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #ffffff; }
+.listPanel, .detailsPanel { padding: clamp(20px, 3vw, 32px); }
+.listPanel { border-right: 1px solid #e2e8f0; }
+.listPanel h2, .detailsPanel h2 { margin-bottom: 18px; font-size: 1.2rem; }
+.bikerList { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bikerButton { display: flex; align-items: center; width: 100%; min-height: 56px; gap: 12px; padding: 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #1e293b; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.bikerButton:hover { background: #fff7ed; }
+.bikerButton.selected { border-color: #fdba74; background: #fff7ed; color: #9a3412; }
+.profilePicture, .profileFallback { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 50%; }
+.profilePicture { object-fit: cover; background: #e2e8f0; }
+.profileFallback { display: grid; place-items: center; background: #fed7aa; color: #9a3412; font-size: 0.95rem; }
+.status, .error { margin: 0; color: #64748b; }
+.error { margin-bottom: 16px; color: #b91c1c; font-weight: 600; }
+.detailSections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.detailSection { padding: 18px; border: 1px solid #e2e8f0; border-radius: 6px; }
+.detailSection h3 { margin: 0 0 14px; color: #334155; font-size: 0.9rem; }
+.driverIdentity { display: flex; align-items: center; gap: 16px; }
+.detailProfilePicture, .detailProfileFallback { flex: 0 0 72px; width: 72px; height: 72px; border-radius: 50%; }
+.detailProfilePicture { object-fit: cover; background: #e2e8f0; }
+.detailProfileFallback { display: grid; place-items: center; background: #fed7aa; color: #9a3412; font-size: 1.35rem; }
+.detailList, .driverIdentity dl { display: grid; gap: 10px; margin: 0; }
+.detailList div, .driverIdentity dl div { display: grid; gap: 2px; }
+.detailList dt, .driverIdentity dt { color: #64748b; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; }
+.detailList dd, .driverIdentity dd { margin: 0; color: #1e293b; overflow-wrap: anywhere; }
+.documentImages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.documentImages a { display: block; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 4px; }
+.documentImages img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+
+@media (max-width: 720px) {
+	.header { flex-direction: column; gap: 16px; }
+	.createButton { margin-top: 0; }
+	.workspace { grid-template-columns: 1fr; }
+	.listPanel { border-right: 0; border-bottom: 1px solid #e2e8f0; }
+	.detailSections { grid-template-columns: 1fr; }
+}

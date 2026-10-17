@@ -1,0 +1,23 @@
+.page { min-height: 100vh; padding: 40px clamp(20px, 5vw, 72px); background: #f8fafc; color: #0f172a; }
+.header { margin-bottom: 32px; }
+.backLink { display: inline-block; margin-bottom: 28px; color: #c2410c; font-size: 0.9rem; font-weight: 700; text-decoration: none; }
+.backLink:hover { text-decoration: underline; }
+.eyebrow { margin: 0 0 6px; color: #64748b; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; }
+.page h1, .sectionHeader h2 { margin: 0; }
+.page h1 { font-size: 2rem; }
+.intro { margin: 8px 0 0; color: #64748b; }
+.sectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.sectionHeader h2 { font-size: 1.25rem; }
+.count { color: #64748b; }
+.error { margin: 0 0 16px; color: #b91c1c; font-weight: 600; }
+.cardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.card { display: block; color: inherit; text-decoration: none; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; }
+.card:hover { border-color: #c2410c; box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08); }
+.cardHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.cardHeader h3 { margin: 0; font-size: 1.05rem; }
+.currency { padding: 2px 8px; border-radius: 999px; background: #ffedd5; color: #9a3412; font-size: 0.75rem; font-weight: 700; }
+.balance { display: block; margin: 14px 0; color: #9a3412; font-size: 1.6rem; }
+.details { margin: 0; display: grid; gap: 8px; }
+.details div { display: flex; justify-content: space-between; gap: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 0.9rem; }
+.details dt { color: #64748b; }
+.details dd { margin: 0; font-weight: 600; text-align: right; }

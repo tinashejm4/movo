@@ -1,0 +1,9 @@
+node_modules
+node_modules - Copy
+.next
+.git
+.env*
+Dockerfile
+.dockerignore
+docker-compose.yml
+npm-debug.log*

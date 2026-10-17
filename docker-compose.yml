@@ -1,0 +1,8 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://test-movo-backend-935754022035.europe-west1.run.app}
+    ports:
+      - "3000:3000"
