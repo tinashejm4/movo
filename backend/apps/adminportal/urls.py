@@ -22,6 +22,7 @@ from apps.adminportal.views.bikers_views import (
 
 from .views.delivery_order_views import DeliveryPageView
 from .views.driver_shift_views import WeeklyShiftsView, WeeklyShiftDetailView, DriverExceptionsView, DriverExceptionDetailView, DriverShiftReminderView
+from .views.handover_review_views import HandoverReviewListView, HandoverReviewResolveView
 
 delivery_metrics = DeliveryPageView.as_view({"get": "delivery_metrics"})
 delivery_order_list = DeliveryPageView.as_view({"get": "delivery_order_list"})
@@ -29,6 +30,8 @@ today_delivery_metrics = DeliveryPageView.as_view({"get": "today_delivery_metric
 
 
 urlpatterns = [
+    path("handover-reviews/", HandoverReviewListView.as_view(), name="admin_handover_reviews"),
+    path("handover-reviews/<uuid:attempt_id>/resolve/", HandoverReviewResolveView.as_view(), name="admin_handover_review_resolve"),
     path("driver-shifts/reminder/", DriverShiftReminderView.as_view(), name="admin_driver_shift_reminder"),
     path("driver-shifts/", WeeklyShiftsView.as_view(), name="admin_driver_shifts"),
     path("driver-shifts/<int:weekday>/", WeeklyShiftDetailView.as_view(), name="admin_driver_shift_detail"),

@@ -23,6 +23,14 @@ class ErrorResponseSerializer(serializers.Serializer):
 class PickupPackageRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     sender_code = serializers.CharField()
+    request_id = serializers.UUIDField(required=False)
+    assignment_id = serializers.UUIDField(required=False)
+    image_id = serializers.IntegerField(required=False)
+    cash_received = serializers.BooleanField(required=False, default=False)
+    captured_at = serializers.DateTimeField(required=False)
+
+    def validate(self, attrs):
+        return validate_handover_fields(attrs)
 
 
 class PickupPackageResponseSerializer(serializers.Serializer):
@@ -33,6 +41,25 @@ class PickupPackageResponseSerializer(serializers.Serializer):
 class DropoffPackageRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()
     receiver_code = serializers.CharField()
+    request_id = serializers.UUIDField(required=False)
+    assignment_id = serializers.UUIDField(required=False)
+    image_id = serializers.IntegerField(required=False)
+    cash_received = serializers.BooleanField(required=False, default=False)
+    captured_at = serializers.DateTimeField(required=False)
+
+    def validate(self, attrs):
+        return validate_handover_fields(attrs)
+
+
+def validate_handover_fields(attrs):
+    pod_fields = {"request_id", "assignment_id", "image_id"}
+    if attrs["cash_received"] or pod_fields.intersection(attrs):
+        missing = pod_fields.difference(attrs)
+        if missing:
+            raise serializers.ValidationError(
+                {field: "Required for a POD handover" for field in missing}
+            )
+    return attrs
 
 
 class DropoffPackageResponseSerializer(serializers.Serializer):

@@ -349,7 +349,7 @@ class CurrentAssignmentEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data["assignment"])
 
-    def test_get_excludes_active_assignment_from_a_previous_day(self):
+    def test_get_keeps_active_assignment_from_a_previous_day(self):
         self.package.assigned_at = timezone.now() - timedelta(days=1)
         self.package.save(update_fields=["assigned_at"])
         self.client.force_authenticate(user=self.biker_user)
@@ -357,7 +357,7 @@ class CurrentAssignmentEndpointTests(APITestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIsNone(response.data["assignment"])
+        self.assertEqual(response.data["assignment"]["package_id"], self.package.pk)
 
 
 class ConfirmCashReceivedEndpointTests(APITestCase):
@@ -501,7 +501,7 @@ class CurrentPackageLifecycleUpdateTests(APITestCase):
         )
         self.client.force_authenticate(user=self.biker_user)
 
-    @patch("apps.transporters.views.notify_current_packages_changed")
+    @patch("apps.transporters.handover_service.notify_current_packages_changed")
     def test_pickup_notifies_current_packages(self, notify):
         PackageStatus.objects.create(package=self.package, status="Assigned")
 
@@ -514,8 +514,8 @@ class CurrentPackageLifecycleUpdateTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         notify.assert_called_once_with(package=self.package, reason="picked_up")
 
-    @patch("apps.transporters.views.notify_current_packages_changed")
-    @patch("apps.transporters.views.assign_pending_packages")
+    @patch("apps.transporters.handover_service.notify_current_packages_changed")
+    @patch("apps.transporters.handover_service.assign_pending_packages_safely")
     def test_delivery_notifies_current_packages(self, assign_packages, notify):
         assign_packages.return_value = {
             "message": "No pending packages available for assignment",
@@ -525,11 +525,12 @@ class CurrentPackageLifecycleUpdateTests(APITestCase):
         }
         PackageStatus.objects.create(package=self.package, status="In Transit")
 
-        response = self.client.post(
-            reverse("dropoff_package"),
-            {"package_id": self.package.id, "receiver_code": "222222"},
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("dropoff_package"),
+                {"package_id": self.package.id, "receiver_code": "222222"},
+                format="json",
+            )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         notify.assert_called_once_with(package=self.package, reason="delivered")

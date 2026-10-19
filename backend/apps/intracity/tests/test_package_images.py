@@ -6,6 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 from PIL import Image
+from drf_spectacular.generators import SchemaGenerator
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -86,3 +87,32 @@ class PackageImageEndpointTests(APITestCase):
     def test_only_get_and_post_are_available(self):
         self.assertEqual(self.client.delete(self.url).status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
         self.assertEqual(self.client.patch(self.url, {}).status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_openapi_documents_multipart_upload_and_image_responses(self):
+        schema = SchemaGenerator().get_schema(public=True)
+        path = next(path for path in schema["paths"] if "package-images/{package_id}/" in path)
+        operations = schema["paths"][path]
+
+        request_content = operations["post"]["requestBody"]["content"]
+        self.assertEqual(set(request_content), {"multipart/form-data"})
+        request_ref = request_content["multipart/form-data"]["schema"]["$ref"]
+        request_schema = schema["components"]["schemas"][request_ref.rsplit("/", 1)[-1]]
+        self.assertEqual(
+            set(request_schema["properties"]),
+            {"image", "upload_id", "stage", "assignment_id"},
+        )
+        self.assertEqual(request_schema["required"], ["image"])
+
+        for method, response_code in (("get", "200"), ("post", "200"), ("post", "201")):
+            self.assertIn("application/json", operations[method]["responses"][response_code]["content"])
+
+        post_ref = operations["post"]["responses"]["201"]["content"]["application/json"]["schema"]["$ref"]
+        image_schema = schema["components"]["schemas"][post_ref.rsplit("/", 1)[-1]]
+        self.assertEqual(
+            set(image_schema["properties"]),
+            {"id", "package", "image", "uploaded_at", "upload_id", "stage"},
+        )
+
+        get_ref = operations["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        list_schema = schema["components"]["schemas"][get_ref.rsplit("/", 1)[-1]]
+        self.assertEqual(set(list_schema["properties"]), {"images"})

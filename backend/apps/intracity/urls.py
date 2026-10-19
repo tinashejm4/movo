@@ -1,4 +1,5 @@
 from django.urls import path
+from rest_framework.parsers import FormParser, MultiPartParser
 
 from .views.delivery_views import DeliveryViewSet
 from .views.invoice_views import InvoiceViewSet
@@ -27,7 +28,8 @@ ecocash_notify = PaymentViewSet.as_view({"post": "ecocash_notify"})
 paynow_payment = PaymentViewSet.as_view({"post": "paynow_payment"})
 paynow_notify = PaymentViewSet.as_view({"get": "paynow_notify"})
 package_images = PackageViewSet.as_view(
-    {"get": "get_package_images", "post": "post_package_image"}
+    {"get": "get_package_images", "post": "post_package_image"},
+    parser_classes=[MultiPartParser, FormParser],
 )
 
 

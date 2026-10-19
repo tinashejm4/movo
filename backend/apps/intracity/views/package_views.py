@@ -1,4 +1,7 @@
 from django.utils import timezone
+from django.db import transaction
+import hashlib
+import uuid
 
 from django.db.models import Case, IntegerField, OuterRef, Q, Subquery, When
 from rest_framework import status
@@ -14,6 +17,8 @@ from ..serializers.package_serializers import (
     PackageDetailQuerySerializer,
     PackageDetailSerializer,
     PackageImageSerializer,
+    PackageImagesResponseSerializer,
+    PackageImageUploadSerializer,
     PackageListSerializer,
     PackageCreateSerializer,
     PackagePriceRequestSerializer,
@@ -21,7 +26,7 @@ from ..serializers.package_serializers import (
     SuburbSearchResponseSerializer,
     PackageListRequestSerializer,
 )
-from ..models import Package, PackageImage, PackageStatus, Invoice, SuburbSearchLog
+from ..models import Package, PackageAssignment, PackageImage, PackageStatus, Invoice, SuburbSearchLog
 from ..services.create_package import (
     PackageCreationError,
     PackageCreationNotFound,
@@ -824,6 +829,15 @@ class PackageViewSet(ViewSet):
             )
         return package
 
+    @extend_schema(
+        tags=["intracity/Packages"],
+        responses={
+            200: PackageImagesResponseSerializer,
+            403: ErrorResponseSerializer,
+            404: ErrorResponseSerializer,
+        },
+        description="List the original images uploaded for this package.",
+    )
     def get_package_images(self, request, package_id):
         package = self._image_package_for_user(request, package_id)
         if isinstance(package, Response):
@@ -833,12 +847,81 @@ class PackageViewSet(ViewSet):
         serializer = PackageImageSerializer(images, many=True)
         return Response({"images": serializer.data}, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=["intracity/Packages"],
+        request={"multipart/form-data": PackageImageUploadSerializer},
+        responses={
+            200: PackageImageSerializer,
+            201: PackageImageSerializer,
+            400: ErrorResponseSerializer,
+            403: ErrorResponseSerializer,
+            404: ErrorResponseSerializer,
+            409: ErrorResponseSerializer,
+        },
+        description=(
+            "Upload an image without changing its bytes. For a driver proof-of-delivery "
+            "upload, send upload_id, stage and assignment_id together. Reusing the same "
+            "upload_id and bytes returns the existing image (200); conflicting reuse returns 409."
+        ),
+    )
     def post_package_image(self, request, package_id):
-        package = self._image_package_for_user(request, package_id)
-        if isinstance(package, Response):
-            return package
+        upload = request.FILES.get("image")
+        upload_id = request.data.get("upload_id")
+        stage = request.data.get("stage")
+        assignment_id = request.data.get("assignment_id")
+        pod_upload = any(value is not None for value in (upload_id, stage, assignment_id))
 
-        serializer = PackageImageSerializer(data={"image": request.FILES.get("image")})
-        serializer.is_valid(raise_exception=True)
-        serializer.save(package=package)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        if not pod_upload:
+            package = self._image_package_for_user(request, package_id)
+            if isinstance(package, Response):
+                return package
+            serializer = PackageImageSerializer(data={"image": upload})
+            serializer.is_valid(raise_exception=True)
+            serializer.save(package=package, uploaded_by=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        if not upload_id or stage not in {"pickup", "dropoff"} or not assignment_id:
+            return Response({"error": "upload_id, stage and assignment_id are required"}, status=400)
+        try:
+            upload_id = uuid.UUID(str(upload_id))
+            assignment_id = uuid.UUID(str(assignment_id))
+        except ValueError:
+            return Response({"error": "Invalid upload_id or assignment_id"}, status=400)
+        if not upload:
+            return Response({"error": "image is required"}, status=400)
+
+        digest = hashlib.sha256()
+        for chunk in upload.chunks():
+            digest.update(chunk)
+        upload.seek(0)
+        checksum = digest.hexdigest()
+
+        with transaction.atomic():
+            assignment = PackageAssignment.objects.select_for_update().filter(
+                pk=assignment_id, package_id=package_id, biker__user=request.user
+            ).first()
+            if not assignment:
+                return Response({"error": "Assignment not found"}, status=403)
+            existing = PackageImage.objects.filter(upload_id=upload_id).first()
+            if existing:
+                if (
+                    existing.package_id != package_id
+                    or existing.assignment_id != assignment_id
+                    or existing.uploaded_by_id != request.user.id
+                    or existing.stage != stage
+                    or existing.upload_sha256 != checksum
+                ):
+                    return Response({"error": "upload_id was reused with different data"}, status=409)
+                return Response(PackageImageSerializer(existing).data, status=200)
+
+            serializer = PackageImageSerializer(data={"image": upload})
+            serializer.is_valid(raise_exception=True)
+            serializer.save(
+                package_id=package_id,
+                assignment=assignment,
+                uploaded_by=request.user,
+                upload_id=upload_id,
+                upload_sha256=checksum,
+                stage=stage,
+            )
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
