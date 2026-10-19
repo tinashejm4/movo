@@ -3,7 +3,7 @@ import logging
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
 
 from apps.users.models import Biker, Contact,ProfileImage
@@ -40,7 +40,10 @@ def is_biker_busy(biker):
     return (
         Package.objects.filter(biker=biker)
         .annotate(current_status=Subquery(latest_status))
-        .filter(current_status__in=["Assigned", "In Transit"])
+        .filter(
+            Q(current_status="In Transit")
+            | Q(current_status="Assigned", added_at__date=timezone.localdate(now))
+        )
         .exists()
     )
 

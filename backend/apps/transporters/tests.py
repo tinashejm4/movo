@@ -349,7 +349,7 @@ class CurrentAssignmentEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data["assignment"])
 
-    def test_get_keeps_active_assignment_from_a_previous_day(self):
+    def test_get_uses_creation_day_even_if_assigned_at_is_previous_day(self):
         self.package.assigned_at = timezone.now() - timedelta(days=1)
         self.package.save(update_fields=["assigned_at"])
         self.client.force_authenticate(user=self.biker_user)
@@ -358,6 +358,17 @@ class CurrentAssignmentEndpointTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["assignment"]["package_id"], self.package.pk)
+
+    def test_get_excludes_previous_day_package_assigned_today(self):
+        Package.objects.filter(pk=self.package.pk).update(
+            added_at=timezone.now() - timedelta(days=1)
+        )
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["assignment"])
 
 
 class ConfirmCashReceivedEndpointTests(APITestCase):

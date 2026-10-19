@@ -357,7 +357,10 @@ class TransporterView(ViewSet):
         )[:1]
 
         package = (
-            Package.objects.filter(biker__user=request.user)
+            Package.objects.filter(
+                biker__user=request.user,
+                added_at__date=timezone.localdate(),
+            )
             .select_related(
                 "biker__user",
                 "sender__user",
