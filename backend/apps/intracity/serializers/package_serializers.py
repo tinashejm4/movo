@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from ..models import PackageImage
 
 
 class ErrorResponseSerializer(serializers.Serializer):
@@ -124,6 +125,7 @@ class PackageCreateSerializer(serializers.Serializer):
     is_pay_forward = serializers.BooleanField(required=False, default=False)
     is_sender_initiated = serializers.BooleanField(required=False, default=True)
 
+
 class PackagePriceRequestSerializer(serializers.Serializer):
     city_id = serializers.IntegerField(required=True)
     from_suburb_id = serializers.IntegerField()
@@ -150,3 +152,21 @@ class SuburbSearchItemSerializer(serializers.Serializer):
 
 class SuburbSearchResponseSerializer(serializers.Serializer):
     suburbs = SuburbSearchItemSerializer(many=True)
+
+
+class PackageImageUploadSerializer(serializers.Serializer):
+    image = serializers.ImageField()
+    upload_id = serializers.UUIDField(required=False)
+    stage = serializers.ChoiceField(choices=("pickup", "dropoff"), required=False)
+    assignment_id = serializers.UUIDField(required=False)
+
+
+class PackageImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PackageImage
+        fields = ("id", "package", "image", "uploaded_at", "upload_id", "stage")
+        read_only_fields = ("id", "package", "uploaded_at", "upload_id", "stage")
+
+
+class PackageImagesResponseSerializer(serializers.Serializer):
+    images = PackageImageSerializer(many=True)

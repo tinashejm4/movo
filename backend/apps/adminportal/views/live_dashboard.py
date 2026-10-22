@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from apps.users.permissions import IsStaff
 from apps.transporters.models import BikerDailySession
+from apps.transporters.shift_service import effective_shift, shift_allows_work, reconcile_driver
 from django.shortcuts import get_object_or_404
 from django.http import JsonResponse
 from django.db.models import OuterRef, Subquery
@@ -93,7 +94,10 @@ class BikerMetricsView(APIView):
                 assigned_at__date=timezone.localdate()
             ).count()
 
-            session = BikerDailySession.objects.filter(biker=biker, is_active=True, start_time__date=timezone.localdate()).first()
+            reconcile_driver(biker)
+            session = BikerDailySession.objects.filter(biker=biker, is_active=True, date=timezone.localdate()).first()
+            if session and not shift_allows_work(effective_shift(biker, timezone.localdate()), timezone.now()):
+                session = None
 
             biker_details.append({
                 "biker_id": biker.id,

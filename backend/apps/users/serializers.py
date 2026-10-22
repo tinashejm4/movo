@@ -18,9 +18,9 @@ class StaffLoginRequestSerializer(serializers.Serializer):
 
 
 class StaffProfileResponseSerializer(serializers.Serializer):
-    staff_id = serializers.IntegerField()
-    branch_id = serializers.IntegerField()
-    branch_name = serializers.CharField()
+    staff_id = serializers.IntegerField(allow_null=True)
+    branch_id = serializers.IntegerField(allow_null=True)
+    branch_name = serializers.CharField(allow_null=True)
 
 
 class TokenRefreshRequestSerializer(serializers.Serializer):
@@ -93,3 +93,4 @@ class DriverProfileResponseSerializer(serializers.Serializer):
     phone_number = serializers.CharField(allow_blank=True, required=False)
     profile_image = serializers.CharField(allow_blank=True, required=False)
     joined_on = serializers.DateTimeField()
+    scheduled_clock_out_time = serializers.CharField(allow_null=True)

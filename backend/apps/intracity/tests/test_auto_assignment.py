@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from datetime import timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
@@ -10,7 +10,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.users.models import Biker, City, Customer, Suburb
-from apps.transporters.models import BikerDailySession
+from apps.transporters.models import BikerDailySession, WeeklyDriverShift
 
 from ..models import Package, PackageStatus
 from ..services.package_assignment import assign_pending_packages, is_biker_busy
@@ -18,6 +18,10 @@ from ..services.package_assignment import assign_pending_packages, is_biker_busy
 
 class AutomaticPackageAssignmentTests(APITestCase):
     def setUp(self):
+        WeeklyDriverShift.objects.get_or_create(weekday=timezone.localdate().weekday())
+        WeeklyDriverShift.objects.update(
+            is_open=True, start_time=time.min, end_time=time.max
+        )
         self.city = City.objects.create(
             name="Harare",
             province="Harare",
@@ -225,6 +229,62 @@ class AutomaticPackageAssignmentTests(APITestCase):
         PackageStatus.objects.create(package=package, status="In Transit")
 
         self.assertTrue(is_biker_busy(biker))
+
+    @patch("apps.intracity.services.package_assignment._publish_assignments")
+    def test_previous_day_uncollected_assignment_does_not_block_today(
+        self, publish_assignments
+    ):
+        biker = Biker.objects.create(
+            user=User.objects.create_user(username="stale-assignment-driver")
+        )
+        BikerDailySession.objects.create(
+            biker=biker,
+            date=timezone.localdate(),
+            start_time=timezone.now(),
+            is_active=True,
+        )
+        receiver = Customer.objects.create(
+            user=User.objects.create_user(username="stale-assignment-receiver")
+        )
+        package = Package.objects.create(
+            sender=self.sender,
+            receiver=receiver,
+            city=self.city,
+            biker=biker,
+            pickup_area=self.pickup_area,
+            pickup_address="Avondale",
+            dropoff_area=self.dropoff_area,
+            dropoff_address="Borrowdale",
+            sender_code="111111",
+            receiver_code="222222",
+            assigned_at=timezone.now() - timedelta(days=1),
+        )
+        Package.objects.filter(pk=package.pk).update(
+            added_at=timezone.now() - timedelta(days=1)
+        )
+        PackageStatus.objects.create(package=package, status="Assigned")
+
+        self.assertFalse(is_biker_busy(biker))
+
+        today_package = Package.objects.create(
+            sender=self.sender,
+            receiver=receiver,
+            city=self.city,
+            pickup_area=self.pickup_area,
+            pickup_address="Avondale",
+            dropoff_area=self.dropoff_area,
+            dropoff_address="Borrowdale",
+            sender_code="333333",
+            receiver_code="444444",
+        )
+        PackageStatus.objects.create(package=today_package, status="Pending")
+
+        result = assign_pending_packages()
+
+        today_package.refresh_from_db()
+        self.assertEqual(result["assigned_count"], 1)
+        self.assertEqual(today_package.biker_id, biker.id)
+        publish_assignments.assert_not_called()
 
     @patch("apps.intracity.services.package_assignment._publish_assignments")
     def test_previous_day_pending_package_is_not_in_the_dispatch_queue(

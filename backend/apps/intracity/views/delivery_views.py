@@ -74,7 +74,7 @@ class DeliveryViewSet(ViewSet):
             )
 
         package = get_object_or_404(
-            Package.objects.select_related(
+            Package.objects.select_for_update().select_related(
                 "sender__user", "receiver__user", "invoice"
             ),
             id=package_id,
@@ -89,7 +89,7 @@ class DeliveryViewSet(ViewSet):
 
         latest_status = (
             PackageStatus.objects.filter(package=package)
-            .order_by("-updated_at")
+            .order_by("-updated_at", "-pk")
             .first()
         )
         current_status = latest_status.status if latest_status else None

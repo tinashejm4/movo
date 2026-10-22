@@ -3,11 +3,12 @@ import logging
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
 
 from apps.users.models import Biker, Contact,ProfileImage
 from apps.transporters.models import BikerDailySession
+from apps.transporters.shift_service import effective_shift, shift_allows_work
 from apps.notifications.services import queue_package_assignment_notifications
 
 from ..models import Package, PackageStatus
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 def is_biker_busy(biker):
     """Return whether a biker has a package awaiting collection or in transit."""
+    now = timezone.now()
+    if not shift_allows_work(effective_shift(biker, timezone.localdate(now)), now):
+        return True
     session = BikerDailySession.objects.filter(
         biker=biker,
         date=timezone.localdate(),
@@ -34,9 +38,12 @@ def is_biker_busy(biker):
         .values("status")[:1]
     )
     return (
-        Package.objects.filter(biker=biker, added_at__date=timezone.localdate())
+        Package.objects.filter(biker=biker)
         .annotate(current_status=Subquery(latest_status))
-        .filter(current_status__in=["Assigned", "In Transit"])
+        .filter(
+            Q(current_status="In Transit")
+            | Q(current_status="Assigned", added_at__date=timezone.localdate(now))
+        )
         .exists()
     )
 

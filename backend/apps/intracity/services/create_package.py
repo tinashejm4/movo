@@ -1,5 +1,4 @@
-import random
-import string
+import secrets
 
 from django.db import transaction
 
@@ -95,6 +94,6 @@ def create_package(*, user, data):
 
 def _generate_collection_code():
     while True:
-        code = "".join(random.choices(string.digits, k=6))
+        code = f"{secrets.randbelow(1_000_000):06d}"
         if not Package.objects.filter(receiver_code=code).exists():
             return code

@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.contrib.auth.models import User
 from django.urls import reverse
@@ -12,7 +12,7 @@ from apps.bookkeeping.models import Account, IntracitySale
 from apps.intracity.models import Invoice, Package, PackageStatus
 from apps.users.models import Biker, City, Customer, Suburb
 
-from .models import BikerDailySession
+from .models import BikerDailySession, WeeklyDriverShift
 from .services import free_drivers_and_close_packages
 
 
@@ -134,6 +134,7 @@ class FreeDriversTestEndpointTests(APITestCase):
 
 class BikerDailySessionEndpointTests(APITestCase):
     def setUp(self):
+        WeeklyDriverShift.objects.update(start_time=time.min, end_time=time.max)
         self.user = User.objects.create_user(
             username="session-driver",
             password="Pass@123",
@@ -348,9 +349,20 @@ class CurrentAssignmentEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data["assignment"])
 
-    def test_get_excludes_active_assignment_from_a_previous_day(self):
+    def test_get_uses_creation_day_even_if_assigned_at_is_previous_day(self):
         self.package.assigned_at = timezone.now() - timedelta(days=1)
         self.package.save(update_fields=["assigned_at"])
+        self.client.force_authenticate(user=self.biker_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["assignment"]["package_id"], self.package.pk)
+
+    def test_get_excludes_previous_day_package_assigned_today(self):
+        Package.objects.filter(pk=self.package.pk).update(
+            added_at=timezone.now() - timedelta(days=1)
+        )
         self.client.force_authenticate(user=self.biker_user)
 
         response = self.client.get(self.url)
@@ -500,7 +512,7 @@ class CurrentPackageLifecycleUpdateTests(APITestCase):
         )
         self.client.force_authenticate(user=self.biker_user)
 
-    @patch("apps.transporters.views.notify_current_packages_changed")
+    @patch("apps.transporters.handover_service.notify_current_packages_changed")
     def test_pickup_notifies_current_packages(self, notify):
         PackageStatus.objects.create(package=self.package, status="Assigned")
 
@@ -513,8 +525,8 @@ class CurrentPackageLifecycleUpdateTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         notify.assert_called_once_with(package=self.package, reason="picked_up")
 
-    @patch("apps.transporters.views.notify_current_packages_changed")
-    @patch("apps.transporters.views.assign_pending_packages")
+    @patch("apps.transporters.handover_service.notify_current_packages_changed")
+    @patch("apps.transporters.handover_service.assign_pending_packages_safely")
     def test_delivery_notifies_current_packages(self, assign_packages, notify):
         assign_packages.return_value = {
             "message": "No pending packages available for assignment",
@@ -524,11 +536,12 @@ class CurrentPackageLifecycleUpdateTests(APITestCase):
         }
         PackageStatus.objects.create(package=self.package, status="In Transit")
 
-        response = self.client.post(
-            reverse("dropoff_package"),
-            {"package_id": self.package.id, "receiver_code": "222222"},
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("dropoff_package"),
+                {"package_id": self.package.id, "receiver_code": "222222"},
+                format="json",
+            )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         notify.assert_called_once_with(package=self.package, reason="delivered")

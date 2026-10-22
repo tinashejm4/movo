@@ -10,7 +10,7 @@ from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiResponse
-from apps.intracity.models import Package, PackageStatus, Invoice
+from apps.intracity.models import Package, PackageAssignment, PackageStatus, Invoice
 from apps.intracity.services.package_assignment import (
     assign_pending_packages,
     assign_pending_packages_safely,
@@ -22,11 +22,15 @@ from apps.bookkeeping.models import Account, IntracitySale, FundsTransfer
 from apps.users.models import Contact, ProfileImage
 from apps.notifications.services import queue_package_customer_notification
 from .models import BikerDailySession
+from .models import DriverClockInterval
+from .shift_service import clock_out, effective_shift, reconcile_driver, shift_allows_work
 from .services import (
     CashConfirmationError,
     confirm_cash_received,
     free_drivers_and_close_packages,
 )
+from .handover_verifiers import make_offline_verifier
+from .handover_service import process_handover
 
 
 from .serializers import (
@@ -102,6 +106,7 @@ class TransporterView(ViewSet):
         },
     )
     def get_daily_session(self, request):
+        reconcile_driver(request.user.biker)
         session = BikerDailySession.objects.filter(
             biker__user=request.user,
             date=timezone.localdate(),
@@ -132,21 +137,37 @@ class TransporterView(ViewSet):
         serializer = ActivateDeactivateRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         is_biker_activated = serializer.validated_data.get("is_biker_activated")
+        now = timezone.now()
+        biker = request.user.biker
+        reconcile_driver(biker, now)
+        if is_biker_activated and not shift_allows_work(effective_shift(biker, timezone.localdate(now)), now):
+            return Response(
+                {"detail": "Driver activation is outside scheduled working hours."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         # Update the biker's daily session status
-        session = BikerDailySession.objects.filter(
+        session = BikerDailySession.objects.select_for_update().filter(
             biker__user=request.user, date=timezone.localdate()
         ).first()
         if session:
-            session.is_active = is_biker_activated
-            session.save()
+            if is_biker_activated and not session.is_active:
+                session.is_active = True
+                session.end_time = None
+                session.save(update_fields=['is_active', 'end_time'])
+                DriverClockInterval.objects.create(session=session, clocked_in_at=now)
+            elif not is_biker_activated:
+                clock_out(session, now=now, reason=DriverClockInterval.MANUAL)
         else:
-            BikerDailySession.objects.create(
-                biker=request.user.biker,
+            session = BikerDailySession.objects.create(
+                biker=biker,
                 date=timezone.localdate(),
-                start_time=timezone.now(),
+                start_time=now,
                 is_active=is_biker_activated,
             )
-        if is_biker_activated:
+            if is_biker_activated:
+                DriverClockInterval.objects.create(session=session, clocked_in_at=now)
+        if is_biker_activated and session.is_active:
+            reconcile_driver(biker, now)
             transaction.on_commit(assign_pending_packages_safely)
         return Response(
             {"is_biker_activated": is_biker_activated},
@@ -175,7 +196,9 @@ class TransporterView(ViewSet):
         package_id = serializer.validated_data.get("package_id")
         reason = serializer.validated_data.get("reason")
 
-        package = get_object_or_404(Package, id=package_id)
+        package = get_object_or_404(
+            Package.objects.select_for_update(), id=package_id
+        )
 
         if not package.biker:
             return Response(
@@ -191,7 +214,7 @@ class TransporterView(ViewSet):
 
         latest_status = (
             PackageStatus.objects.filter(package=package)
-            .order_by("-updated_at")
+            .order_by("-updated_at", "-pk")
             .first()
         )
         if latest_status and latest_status.status not in ["Pending", "Assigned"]:
@@ -211,7 +234,7 @@ class TransporterView(ViewSet):
             package=package,
             event_type="package.cancelled",
         )
-        assign_pending_packages()
+        transaction.on_commit(assign_pending_packages_safely)
         logger.log(
             logging.INFO,
             f"Package {package_id} cancelled by biker {request.user.id} for reason: {reason}. Date: {timezone.now()}",
@@ -235,85 +258,26 @@ class TransporterView(ViewSet):
                 ErrorResponseSerializer,
                 description="Biker is not assigned to this package",
             ),
+            409: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Request ID reused or queued handover conflicts with server state",
+            ),
         },
     )
-    @transaction.atomic
     def pickup_package(self, request):
         serializer = PickupPackageRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=False)
-        data = serializer.initial_data
-        package_id = data.get("package_id")
-        sender_code = (data.get("sender_code") or "").strip()
-
-        if not package_id or not sender_code:
-            return Response(
-                {"error": "package_id and sender_code are required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        package = get_object_or_404(Package, id=package_id)
-
-        if not package.biker:
-            return Response(
-                {"error": "Package has not been assigned to a biker yet"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.biker.user_id != request.user.id:
-            return Response(
-                {"error": "You are not assigned to this package"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        latest_status = (
-            PackageStatus.objects.filter(package=package)
-            .order_by("-updated_at")
-            .first()
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        result_status, result = process_handover(
+            package_id=data["package_id"], biker_user=request.user,
+            stage="pickup", code=data["sender_code"].strip(),
+            request_id=data.get("request_id"),
+            assignment_id=data.get("assignment_id"),
+            image_id=data.get("image_id"),
+            cash_received=data["cash_received"],
+            captured_at=data.get("captured_at"),
         )
-        if latest_status and latest_status.status not in ["Pending", "Assigned"]:
-            return Response(
-                {
-                    "error": "Package should be Pending or Assigned. Current status: "
-                    + latest_status.status.lower()
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.sender_code != sender_code:
-            return Response(
-                {"error": "Invalid sender code"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        invoice = Invoice.objects.filter(package=package).first()
-        if invoice and not invoice.is_pay_forward and not invoice.is_paid:
-            return Response(
-                {"error": "Cash must be confirmed before collecting this package"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not invoice:
-            return Response(
-                {"error": "Package cannot be collected because the invoice is missing"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        PackageStatus.objects.create(package=package, status="In Transit")
-        notify_current_packages_changed(package=package, reason="picked_up")
-        queue_package_customer_notification(
-            package=package,
-            event_type="package.picked_up",
-        )
-
-        serializer = PickupPackageResponseSerializer(
-            {
-                "message": "Package collected successfully",
-                "package_id": package.id,
-                "status": "In Transit",
-            }
-        )
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
+        return Response(result, status=result_status)
 
     @extend_schema(
         tags=["Biker Stuff"],
@@ -328,92 +292,26 @@ class TransporterView(ViewSet):
                 ErrorResponseSerializer,
                 description="User is not assigned to this package",
             ),
+            409: OpenApiResponse(
+                ErrorResponseSerializer,
+                description="Request ID reused or queued handover conflicts with server state",
+            ),
         },
     )
-    @transaction.atomic
     def dropoff_package(self, request):
         serializer = DropoffPackageRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=False)
-        data = serializer.initial_data
-        package_id = data.get("package_id")
-        receiver_code = (data.get("receiver_code") or "").strip()
-
-        if not package_id or not receiver_code:
-            return Response(
-                {"error": "package_id and receiver_code are required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        package = get_object_or_404(
-            Package.objects.select_related("biker__user"), id=package_id
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        result_status, result = process_handover(
+            package_id=data["package_id"], biker_user=request.user,
+            stage="dropoff", code=data["receiver_code"].strip(),
+            request_id=data.get("request_id"),
+            assignment_id=data.get("assignment_id"),
+            image_id=data.get("image_id"),
+            cash_received=data["cash_received"],
+            captured_at=data.get("captured_at"),
         )
-        if not package.biker:
-            return Response(
-                {"error": "Package has not been assigned to a biker yet"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.biker.user_id != request.user.id:
-            return Response(
-                {"error": "You are not assigned to this package"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        latest_status = (
-            PackageStatus.objects.filter(package=package)
-            .order_by("-updated_at")
-            .first()
-        )
-        if not latest_status or latest_status.status != "In Transit":
-            return Response(
-                {
-                    "error": "Package must be in transit before it can be delivered. Current status: "
-                    + (latest_status.status.lower() if latest_status else "none")
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if package.receiver_code != receiver_code:
-            return Response(
-                {"error": "Invalid receiver code"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        invoice = Invoice.objects.filter(package=package).first()
-        if not invoice:
-            return Response(
-                {"error": "Package cannot be delivered because the invoice is missing"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if invoice.is_pay_forward and not invoice.is_paid:
-            return Response(
-                {"error": "Cash must be confirmed before delivering this package"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        PackageStatus.objects.create(package=package, status="Delivered")
-        package.delivered_at = timezone.now()
-        package.save(update_fields=["delivered_at"])
-        notify_current_packages_changed(package=package, reason="delivered")
-        queue_package_customer_notification(
-            package=package,
-            event_type="package.delivered",
-        )
-
-        assign_pending_packages()
-
-        serializer = DropoffPackageResponseSerializer(
-            {
-                "message": "Package delivered successfully",
-                "package_id": package.id,
-                "status": "Delivered",
-                "delivered_at": package.delivered_at,
-            }
-        )
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
+        return Response(result, status=result_status)
 
     @extend_schema(
         tags=["Biker Stuff"],
@@ -459,7 +357,10 @@ class TransporterView(ViewSet):
         )[:1]
 
         package = (
-            Package.objects.filter(biker__user=request.user)
+            Package.objects.filter(
+                biker__user=request.user,
+                added_at__date=timezone.localdate(),
+            )
             .select_related(
                 "biker__user",
                 "sender__user",
@@ -469,7 +370,6 @@ class TransporterView(ViewSet):
             )
             .annotate(current_status=Subquery(latest_status))
             .filter(current_status__in=["Pending", "Assigned", "In Transit"])
-            .filter(assigned_at__date=timezone.localdate())
             .order_by("-assigned_at", "-added_at")
             .first()
         )
@@ -479,6 +379,10 @@ class TransporterView(ViewSet):
 
         contact = Contact.objects.filter(user=package.biker.user).first()
         profile_picture = ProfileImage.objects.filter(user=package.biker.user).first()
+        assignment = PackageAssignment.objects.filter(
+            package=package, biker=package.biker
+        ).order_by("-assigned_at", "-pk").first()
+        invoice = Invoice.objects.filter(package=package).first()
 
         payload = {
             "package_id": package.id,
@@ -515,6 +419,28 @@ class TransporterView(ViewSet):
             ),
             "added_at": package.added_at.isoformat() if package.added_at else None,
             "current_status": package.current_status,
+            "assignment_id": str(assignment.id) if assignment else None,
+            "pickup_code_verifier": (
+                make_offline_verifier(
+                    package.sender_code, salt=bytes.fromhex(assignment.pickup_salt)
+                ) if assignment else None
+            ),
+            "dropoff_code_verifier": (
+                make_offline_verifier(
+                    package.receiver_code, salt=bytes.fromhex(assignment.dropoff_salt)
+                ) if assignment else None
+            ),
+            "payment": (
+                {
+                    "is_paid": invoice.is_paid,
+                    "is_pay_forward": invoice.is_pay_forward,
+                    "amount": str(invoice.amount),
+                    "cash_due_stage": (
+                        None if invoice.is_paid else
+                        ("dropoff" if invoice.is_pay_forward else "pickup")
+                    ),
+                } if invoice else None
+            ),
         }
 
         return Response({"assignment": payload}, status=status.HTTP_200_OK)

@@ -103,6 +103,11 @@ class StaffProfileView(APIView):
         try:
             staff = Staff.objects.select_related("branch").get(user=request.user)
         except Staff.DoesNotExist:
+            if request.user.is_superuser:
+                return Response(
+                    {"staff_id": None, "branch_id": None, "branch_name": None},
+                    status=status.HTTP_200_OK,
+                )
             return Response(
                 {"error": "Staff profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
@@ -717,6 +722,9 @@ class DriverProfileView(APIView):
 
         contact = get_object_or_404(Contact, user=user)
         profile_image = get_object_or_404(ProfileImage, user=user)
+        from apps.transporters.shift_service import effective_shift
+
+        shift = effective_shift(biker, timezone.localdate())
 
         return Response(
             {
@@ -726,6 +734,9 @@ class DriverProfileView(APIView):
                 "phone_number": f"0{contact.phone_number}",
                 "profile_image": profile_image.profile_image.url,
                 "joined_on": biker.date_joined,
+                "scheduled_clock_out_time": (
+                    shift['end_time'].strftime('%H:%M') if shift['is_open'] else None
+                ),
             },
             status=status.HTTP_200_OK,
         )

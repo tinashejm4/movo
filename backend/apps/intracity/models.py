@@ -1,9 +1,11 @@
 import secrets
+import uuid
 
 from django.db import models
 from django.contrib.auth.models import User
 from apps.users.models import Customer, City, Biker, Suburb
 from apps.bookkeeping.models import ExchangeRate
+from apps.transporters.handover_verifiers import new_salt_hex
 
 
 class Package(models.Model):
@@ -51,9 +53,26 @@ class Package(models.Model):
                 return candidate
 
     def save(self, *args, **kwargs):
+        previous_biker_id = None
+        if self.pk:
+            previous_biker_id = type(self).objects.filter(pk=self.pk).values_list(
+                "biker_id", flat=True
+            ).first()
         if not self.slug:
             self.slug = self.generate_unique_slug()
         super().save(*args, **kwargs)
+        biker_was_saved = kwargs.get("update_fields") is None or "biker" in kwargs["update_fields"]
+        if biker_was_saved and self.biker_id and self.biker_id != previous_biker_id:
+            PackageAssignment.objects.create(package=self, biker_id=self.biker_id)
+
+
+class PackageAssignment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    package = models.ForeignKey(Package, on_delete=models.CASCADE, related_name="assignments")
+    biker = models.ForeignKey(Biker, on_delete=models.CASCADE)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    pickup_salt = models.CharField(max_length=32, default=new_salt_hex)
+    dropoff_salt = models.CharField(max_length=32, default=new_salt_hex)
 
 class PackageStatus(models.Model):
     status_choices = [
@@ -72,6 +91,39 @@ class PackageStatus(models.Model):
     def __str__(self):
         return f"{self.status} - {self.package.slug}"
 
+class PackageImage(models.Model):
+    package = models.ForeignKey(Package, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField(upload_to="package_images/")
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    upload_id = models.UUIDField(unique=True, null=True, blank=True)
+    upload_sha256 = models.CharField(max_length=64, blank=True)
+    stage = models.CharField(max_length=10, blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    assignment = models.ForeignKey(PackageAssignment, on_delete=models.SET_NULL, null=True, blank=True)
+
+    def __str__(self):
+        return f"Image for Package {self.package.slug}"
+
+
+class HandoverAttempt(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    package = models.ForeignKey(Package, on_delete=models.CASCADE)
+    biker = models.ForeignKey(Biker, on_delete=models.CASCADE)
+    assignment = models.ForeignKey(PackageAssignment, on_delete=models.CASCADE)
+    image = models.ForeignKey(PackageImage, on_delete=models.PROTECT)
+    stage = models.CharField(max_length=10)
+    cash_received = models.BooleanField(default=False)
+    fingerprint = models.CharField(max_length=64)
+    code_valid = models.BooleanField(default=False)
+    outcome = models.CharField(max_length=12)
+    conflict_reason = models.CharField(max_length=100, blank=True)
+    response_status = models.PositiveSmallIntegerField()
+    response_data = models.JSONField(default=dict)
+    captured_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    resolution_reason = models.TextField(blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
 class Invoice(models.Model):
     payment_methods = [

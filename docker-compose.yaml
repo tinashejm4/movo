@@ -2,6 +2,7 @@
 services:
   backend:
     build: ./backend
+    image: ${MOVO_BACKEND_IMAGE:-movo-backend}
     container_name: movo_backend
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
@@ -19,6 +20,7 @@ services:
       DB_PASSWORD: movo_password
       DB_HOST: db
       DB_PORT: "5432"
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
     depends_on:
       db:
         condition: service_started
@@ -39,6 +41,7 @@ services:
       DB_PASSWORD: movo_password
       DB_HOST: db
       DB_PORT: "5432"
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
       FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON:-}
       FIREBASE_CREDENTIALS_PATH: ${FIREBASE_CREDENTIALS_PATH:-}
     depends_on:
@@ -46,6 +49,25 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+
+  beat:
+    image: ${MOVO_BACKEND_IMAGE:-movo-backend}
+    command: celery -A Movo beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      DEBUG: ${DEBUG:-1}
+      DB_NAME: movo_db
+      DB_USER: movo_user
+      DB_PASSWORD: movo_password
+      DB_HOST: db
+      DB_PORT: "5432"
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+    depends_on:
+      backend:
+        condition: service_started
 
   db:
     image: postgres:15
