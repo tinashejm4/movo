@@ -89,7 +89,7 @@ class PackageStatus(models.Model):
     updated_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.status} - {self.package.pk}"
+        return f"{self.status} - {self.package.slug}"
 
 class PackageImage(models.Model):
     package = models.ForeignKey(Package, on_delete=models.CASCADE, related_name="images")

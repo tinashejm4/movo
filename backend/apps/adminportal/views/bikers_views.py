@@ -10,6 +10,8 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
 from apps.transporters.shift_service import effective_shift
+from apps.users.utils import is_valid_zimbabwean_number,normalize_zimbabwean_number
+
 
 
 class BikersListView(APIView):
@@ -95,15 +97,15 @@ class BikerCreateView(APIView):
 
         Contact.objects.create(
             user=biker_user,
-            phone_number=phone_number1,
-            phone_number2=phone_number2,
+            phone_number=normalize_zimbabwean_number(phone_number1),
+            phone_number2=normalize_zimbabwean_number(phone_number2) if phone_number2 else None,
             address=address,
         )
 
         NextOfKin.objects.create(
             user=biker_user,
             name=next_of_kin_name,
-            phone_number=next_of_kin_phone_number,
+            phone_number=normalize_zimbabwean_number(next_of_kin_phone_number),
             relationship=next_of_kin_relationship,
         )
 

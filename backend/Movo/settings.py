@@ -97,18 +97,23 @@ ASGI_APPLICATION = "Movo.asgi.application"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://movo-backend-935754022035.europe-west1.run.app",
+    "https://test-movo-backend-935754022035.europe-west1.run.app",
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-]
+    "http://0.0.0.0:3000"
+    ]
 
 CORS_ALLOWED_ORIGINS = [
     "https://movo-backend-935754022035.europe-west1.run.app",
+    "https://test-movo-backend-935754022035.europe-west1.run.app",
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    
-]
+    "http://0.0.0.0:3000"
+
+    ]
+
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
