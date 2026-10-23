@@ -290,6 +290,56 @@ class IntracityPackageListTests(APITestCase):
         self.assertEqual(response.data["packages"][0]["package_id"], active_package.id)
         self.assertEqual(response.data["packages"][0]["confirmation_code"], "111111")
 
+    def test_current_packages_excludes_delivered_cancelled_and_expired_packages(self):
+        pending_package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Avondale",
+            dropoff_address="Borrowdale",
+            sender_code="111111",
+            receiver_code="222222",
+        )
+        delivered_package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Belgravia",
+            dropoff_address="Marlborough",
+            sender_code="333333",
+            receiver_code="444444",
+        )
+        cancelled_package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Gunhill",
+            dropoff_address="Greendale",
+            sender_code="555555",
+            receiver_code="666666",
+        )
+        expired_package = Package.objects.create(
+            sender=self.sender,
+            receiver=self.receiver,
+            city=self.city,
+            pickup_address="Sunningdale",
+            dropoff_address="Mt Pleasant",
+            sender_code="777777",
+            receiver_code="888888",
+        )
+        PackageStatus.objects.create(package=pending_package, status="Pending")
+        PackageStatus.objects.create(package=delivered_package, status="Delivered")
+        PackageStatus.objects.create(package=cancelled_package, status="Cancelled")
+        PackageStatus.objects.create(package=expired_package, status="Expired")
+
+        response = self.client.get(reverse("intracity_current_packages"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [package["package_id"] for package in response.data["packages"]],
+            [pending_package.id],
+        )
+
     def test_current_packages_prioritizes_status_then_newest_creation(self):
         def create_package(pickup_address):
             return Package.objects.create(

@@ -826,7 +826,7 @@ class PackageViewSet(ViewSet):
                 | Q(is_renewed=True, renewed_at__date=timezone.localdate())
                 | Q(current_status="In Transit")
             )
-            .exclude(current_status="Cancelled")
+            .filter(current_status__in=["Pending", "Assigned", "In Transit"])
             .annotate(
                 current_package_priority=Case(
                     When(current_status="In Transit", then=0),
