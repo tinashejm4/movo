@@ -27,7 +27,14 @@ from ..serializers.package_serializers import (
     SuburbSearchResponseSerializer,
     PackageListRequestSerializer,
 )
-from ..models import Package, PackageAssignment, PackageImage, PackageStatus, Invoice, SuburbSearchLog
+from ..models import (
+    Package,
+    PackageAssignment,
+    PackageImage,
+    PackageStatus,
+    Invoice,
+    SuburbSearchLog,
+)
 from ..services.create_package import (
     PackageCreationError,
     PackageCreationNotFound,
@@ -54,38 +61,75 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class PackageListPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = "page_size"
     max_page_size = 10
 
+
 class PackageViewSet(ViewSet):
     ACTIVE_PACKAGE_STATUSES = {"Pending", "Assigned", "In Transit"}
 
-    @extend_schema(tags=["intracity/Packages"], request={"application/json": {"type": "object", "properties": {"package_id": {"type": "integer"}}, "required": ["package_id"]}})
+    @extend_schema(
+        tags=["intracity/Packages"],
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {"package_id": {"type": "integer"}},
+                "required": ["package_id"],
+            }
+        },
+    )
     @transaction.atomic
     def renew_package(self, request):
         package_id = request.data.get("package_id")
         if not str(package_id).isdigit():
-            return Response({"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
         package = Package.objects.select_for_update().filter(pk=package_id).first()
         if not package:
-            return Response({"error": "Package not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Package not found"}, status=status.HTTP_404_NOT_FOUND
+            )
         if request.user.id != package_initiator_user_id(package):
-            return Response({"error": "Only the original booking initiator can renew this package"}, status=status.HTTP_403_FORBIDDEN)
-        current_status = (PackageStatus.objects.filter(package=package)
-                          .order_by("-updated_at", "-pk").values_list("status", flat=True).first())
+            return Response(
+                {"error": "Only the original booking initiator can renew this package"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        current_status = (
+            PackageStatus.objects.filter(package=package)
+            .order_by("-updated_at", "-pk")
+            .values_list("status", flat=True)
+            .first()
+        )
         if current_status != "Expired" or package.is_renewed:
-            return Response({"error": "Package cannot be renewed", "current_status": current_status}, status=status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "error": "Package cannot be renewed",
+                    "current_status": current_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         package.is_renewed = True
         package.renewed_at = timezone.now()
         package.save(update_fields=["is_renewed", "renewed_at"])
         PackageStatus.objects.create(package=package, status="Pending")
         notify_current_packages_changed(package=package, reason="renewed")
-        queue_package_customer_notification(package=package, event_type="package.renewed")
+        queue_package_customer_notification(
+            package=package, event_type="package.renewed"
+        )
         transaction.on_commit(assign_pending_packages_safely)
-        return Response({"package_id": package.id, "status": "Pending", "is_renewed": True,
-                         "pickup_date": pickup_date(package).isoformat()}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "package_id": package.id,
+                "status": "Pending",
+                "is_renewed": True,
+                "pickup_date": pickup_date(package).isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
 
     def get_permissions(self):
         if self.action in {
@@ -124,7 +168,6 @@ class PackageViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-
         package = (
             Package.objects.select_related("sender__user", "receiver__user")
             .filter(id=package_id)
@@ -135,15 +178,16 @@ class PackageViewSet(ViewSet):
                 {"error": "Package not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        
 
         customer = package.receiver if package.is_sender_initiated else package.sender
 
         if last_4_digits == customer.user.username[-4:]:
             request_otp(customer.user.username)
             return Response(
-                {"message": "OTP sent to the registered phone number",
-                 "phone_number": customer.user.username,},
+                {
+                    "message": "OTP sent to the registered phone number",
+                    "phone_number": customer.user.username,
+                },
                 status=status.HTTP_201_CREATED,
             )
         else:
@@ -188,7 +232,9 @@ class PackageViewSet(ViewSet):
         package = package_query.first()
         if not package:
             return Response(
-                {"error": f"Package not found. Please check the package code and try again."},
+                {
+                    "error": f"Package not found. Please check the package code and try again."
+                },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -225,9 +271,15 @@ class PackageViewSet(ViewSet):
             "can_cancel": can_cancel_package(
                 invoice=invoice,
                 current_status=current_status,
-            ) and (current_status != "Expired" or request.user.id == package_initiator_user_id(package)),
+            )
+            and (
+                current_status != "Expired"
+                or request.user.id == package_initiator_user_id(package)
+            ),
             "is_renewed": package.is_renewed,
-            "can_renew": current_status == "Expired" and not package.is_renewed and request.user.id == package_initiator_user_id(package),
+            "can_renew": current_status == "Expired"
+            and not package.is_renewed
+            and request.user.id == package_initiator_user_id(package),
             "expired_at": expired_at,
             "pickup_date": pickup_date(package),
             "refund_status": refund_status_for(package),
@@ -344,9 +396,13 @@ class PackageViewSet(ViewSet):
                 {"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        package = Package.objects.select_related(
-            "sender__user", "receiver__user", "biker__user"
-        ).filter(id=package_id).first()
+        package = (
+            Package.objects.select_related(
+                "sender__user", "receiver__user", "biker__user"
+            )
+            .filter(id=package_id)
+            .first()
+        )
         if not package:
             return Response(
                 {"error": f"Package not found for id {package_id}"},
@@ -491,9 +547,7 @@ class PackageViewSet(ViewSet):
                 "pickup_address": package.pickup_address,
                 "dropoff_address": package.dropoff_address,
                 "slug": package.slug,
-                "is_incoming": package_is_incoming_for_user(
-                    package, requester_user_id
-                ),
+                "is_incoming": package_is_incoming_for_user(package, requester_user_id),
                 "package_created_at": package.added_at,
                 "status": {
                     "driver_number": (
@@ -507,16 +561,23 @@ class PackageViewSet(ViewSet):
                     ),
                     "is_active": current_status in self.ACTIVE_PACKAGE_STATUSES,
                     "assigned_at": assigned_at,
-                    "is_collected": collected_at is not None or delivered_at is not None,
+                    "is_collected": collected_at is not None
+                    or delivered_at is not None,
                     "collected_at": collected_at,
                     "is_cancelled": cancelled_at is not None,
                     "cancelled_at": cancelled_at,
                     "can_cancel": can_cancel_package(
                         invoice=invoice,
                         current_status=current_status,
-                    ) and (current_status != "Expired" or requester_user_id == package_initiator_user_id(package)),
+                    )
+                    and (
+                        current_status != "Expired"
+                        or requester_user_id == package_initiator_user_id(package)
+                    ),
                     "is_renewed": package.is_renewed,
-                    "can_renew": current_status == "Expired" and not package.is_renewed and requester_user_id == package_initiator_user_id(package),
+                    "can_renew": current_status == "Expired"
+                    and not package.is_renewed
+                    and requester_user_id == package_initiator_user_id(package),
                     "expired_at": expired_at,
                     "pickup_date": pickup_date(package),
                     "refund_status": refund_status_for(package),
@@ -543,9 +604,7 @@ class PackageViewSet(ViewSet):
         collected_at = status_map.get("In Transit")
         cancelled_at = status_map.get("Cancelled")
         expired_at = status_map.get("Expired")
-        current_status = (
-            status_records[-1].status if status_records else "Pending"
-        )
+        current_status = status_records[-1].status if status_records else "Pending"
         cancellation_status = next(
             (
                 status_record
@@ -554,17 +613,20 @@ class PackageViewSet(ViewSet):
             ),
             None,
         )
+        cancellation_reason = (
+            cancellation_status.comments if cancellation_status else None
+        )
         driver_profile_picture = None
         if package.biker:
-            profile_image = ProfileImage.objects.filter(
-                user=package.biker.user
-            ).first()
+            profile_image = ProfileImage.objects.filter(user=package.biker.user).first()
             if profile_image and profile_image.profile_image:
                 driver_profile_picture = profile_image.profile_image.url
 
         receiver_id = package.receiver.id
         sender_id = package.sender.id
-        initiator_id = package.sender.id if package.is_sender_initiated else package.receiver.id
+        initiator_id = (
+            package.sender.id if package.is_sender_initiated else package.receiver.id
+        )
 
         serializer = PackageDetailSerializer(
             {
@@ -607,17 +669,19 @@ class PackageViewSet(ViewSet):
                 "collected_at": collected_at,
                 "is_cancelled": cancelled_at is not None,
                 "cancelled_at": cancelled_at,
-                "cancellation_reason": (
-                    cancellation_status.comments
-                    if current_status == "Cancelled" and cancellation_status
-                    else None
-                ),
+                "cancellation_reason": cancellation_reason,
                 "can_cancel": can_cancel_package(
                     invoice=invoice,
                     current_status=current_status,
-                ) and (current_status != "Expired" or requester_user_id == package_initiator_user_id(package)),
+                )
+                and (
+                    current_status != "Expired"
+                    or requester_user_id == package_initiator_user_id(package)
+                ),
                 "is_renewed": package.is_renewed,
-                "can_renew": current_status == "Expired" and not package.is_renewed and requester_user_id == package_initiator_user_id(package),
+                "can_renew": current_status == "Expired"
+                and not package.is_renewed
+                and requester_user_id == package_initiator_user_id(package),
                 "expired_at": expired_at,
                 "pickup_date": pickup_date(package),
                 "refund_status": refund_status_for(package),
@@ -771,7 +835,6 @@ class PackageViewSet(ViewSet):
 
         return Response({"suburbs": suburbs}, status=status.HTTP_200_OK)
 
-
     @extend_schema(
         tags=["intracity/Packages"],
         request=None,
@@ -796,13 +859,15 @@ class PackageViewSet(ViewSet):
         user = request.user
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         customer = Customer.objects.filter(user=user).first()
         if not customer:
             return Response(
-                {"error": "Customer profile not found"}, status=status.HTTP_404_NOT_FOUND
+                {"error": "Customer profile not found"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         latest_status = (
@@ -861,9 +926,11 @@ class PackageViewSet(ViewSet):
         return Response({"packages": response_data}, status=status.HTTP_200_OK)
 
     def _image_package_for_user(self, request, package_id):
-        package = Package.objects.select_related(
-            "sender", "receiver", "biker"
-        ).filter(id=package_id).first()
+        package = (
+            Package.objects.select_related("sender", "receiver", "biker")
+            .filter(id=package_id)
+            .first()
+        )
         if not package:
             return Response(
                 {"error": "Package not found"}, status=status.HTTP_404_NOT_FOUND
@@ -894,7 +961,9 @@ class PackageViewSet(ViewSet):
         if isinstance(package, Response):
             return package
 
-        images = PackageImage.objects.filter(package=package).order_by("uploaded_at", "id")
+        images = PackageImage.objects.filter(package=package).order_by(
+            "uploaded_at", "id"
+        )
         serializer = PackageImageSerializer(images, many=True)
         return Response({"images": serializer.data}, status=status.HTTP_200_OK)
 
@@ -920,7 +989,9 @@ class PackageViewSet(ViewSet):
         upload_id = request.data.get("upload_id")
         stage = request.data.get("stage")
         assignment_id = request.data.get("assignment_id")
-        pod_upload = any(value is not None for value in (upload_id, stage, assignment_id))
+        pod_upload = any(
+            value is not None for value in (upload_id, stage, assignment_id)
+        )
 
         if not pod_upload:
             package = self._image_package_for_user(request, package_id)
@@ -932,7 +1003,9 @@ class PackageViewSet(ViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         if not upload_id or stage not in {"pickup", "dropoff"} or not assignment_id:
-            return Response({"error": "upload_id, stage and assignment_id are required"}, status=400)
+            return Response(
+                {"error": "upload_id, stage and assignment_id are required"}, status=400
+            )
         try:
             upload_id = uuid.UUID(str(upload_id))
             assignment_id = uuid.UUID(str(assignment_id))
@@ -948,9 +1021,13 @@ class PackageViewSet(ViewSet):
         checksum = digest.hexdigest()
 
         with transaction.atomic():
-            assignment = PackageAssignment.objects.select_for_update().filter(
-                pk=assignment_id, package_id=package_id, biker__user=request.user
-            ).first()
+            assignment = (
+                PackageAssignment.objects.select_for_update()
+                .filter(
+                    pk=assignment_id, package_id=package_id, biker__user=request.user
+                )
+                .first()
+            )
             if not assignment:
                 return Response({"error": "Assignment not found"}, status=403)
             existing = PackageImage.objects.filter(upload_id=upload_id).first()
@@ -962,7 +1039,10 @@ class PackageViewSet(ViewSet):
                     or existing.stage != stage
                     or existing.upload_sha256 != checksum
                 ):
-                    return Response({"error": "upload_id was reused with different data"}, status=409)
+                    return Response(
+                        {"error": "upload_id was reused with different data"},
+                        status=409,
+                    )
                 return Response(PackageImageSerializer(existing).data, status=200)
 
             serializer = PackageImageSerializer(data={"image": upload})
