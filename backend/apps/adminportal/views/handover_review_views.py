@@ -30,7 +30,7 @@ class HandoverReviewListView(APIView):
                     "cash_received": attempt.cash_received,
                     "conflict_reason": attempt.conflict_reason,
                     "image_id": attempt.image_id,
-                    "image_url": attempt.image.image.url,
+                    "image_url": attempt.image.image.url if attempt.image_id else None,
                     "captured_at": attempt.captured_at,
                     "received_at": attempt.received_at,
                 }

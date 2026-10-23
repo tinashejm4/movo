@@ -7,7 +7,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from apps.intracity.models import Package, PackageAssignment, PackageStatus, Invoice
@@ -357,10 +357,7 @@ class TransporterView(ViewSet):
         )[:1]
 
         package = (
-            Package.objects.filter(
-                biker__user=request.user,
-                added_at__date=timezone.localdate(),
-            )
+            Package.objects.filter(biker__user=request.user)
             .select_related(
                 "biker__user",
                 "sender__user",
@@ -369,7 +366,11 @@ class TransporterView(ViewSet):
                 "dropoff_area",
             )
             .annotate(current_status=Subquery(latest_status))
-            .filter(current_status__in=["Pending", "Assigned", "In Transit"])
+            .filter(
+                Q(current_status="In Transit")
+                | Q(current_status="Assigned", is_renewed=False, added_at__date=timezone.localdate())
+                | Q(current_status="Assigned", is_renewed=True, renewed_at__date=timezone.localdate())
+            )
             .order_by("-assigned_at", "-added_at")
             .first()
         )

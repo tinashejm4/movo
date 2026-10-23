@@ -12,7 +12,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from django.urls import reverse
-from ..models import Invoice, EcocashPayment, PaynowPayment
+from ..models import Invoice, Package, EcocashPayment, PaynowPayment
+from ..services.package_expiration import ensure_refund_review, latest_status_for
 from apps.bookkeeping.models import IntracitySale, Account
 from ..services.invoice_payment import (
     invoice_user_can_pay,
@@ -239,10 +240,9 @@ class PaymentViewSet(ViewSet):
     @transaction.atomic
     def paynow_notify(self, request):
         invoice_id = request.query_params.get("invoice_id")
-        # This endpoint changes both the invoice and its one-to-one ledger row.
-        # Locking the invoice makes concurrent poll requests serialize: once the
-        # first request commits, later requests see the paid invoice and return
-        # without attempting to create another sale.
+        package_id = Invoice.objects.filter(id=invoice_id).values_list("package_id", flat=True).first()
+        if package_id:
+            Package.objects.select_for_update().get(pk=package_id)
         invoice = Invoice.objects.select_for_update().filter(id=invoice_id).first()
 
         if not invoice:
@@ -254,6 +254,8 @@ class PaymentViewSet(ViewSet):
             )
 
         if invoice.is_paid:
+            if latest_status_for(invoice.package) == "Cancelled":
+                ensure_refund_review(invoice.package)
             return Response(
                 {
                     "message": "Invoice is already paid",
@@ -296,6 +298,9 @@ class PaymentViewSet(ViewSet):
                     "amount": invoice.amount,
                 },
             )
+
+            if latest_status_for(invoice.package) == "Cancelled":
+                ensure_refund_review(invoice.package)
 
             return Response(
                 PaynowPaymentProcessedResponseSerializer(
@@ -483,7 +488,10 @@ class PaymentViewSet(ViewSet):
 
         invoice_id = int(merchant_reference)
 
-        invoice = Invoice.objects.filter(id=invoice_id).first()
+        package_id = Invoice.objects.filter(id=invoice_id).values_list("package_id", flat=True).first()
+        if package_id:
+            Package.objects.select_for_update().get(pk=package_id)
+        invoice = Invoice.objects.select_for_update().filter(id=invoice_id).first()
         if not invoice:
             return Response(
                 {"error": "Invoice not found"},
@@ -502,6 +510,9 @@ class PaymentViewSet(ViewSet):
             ecocash_payment.paid_at = invoice.paid_at
             ecocash_payment.provider_response = payload
             ecocash_payment.save(update_fields=["is_successful", "paid_at", "provider_response"])
+
+        if latest_status_for(invoice.package) == "Cancelled":
+            ensure_refund_review(invoice.package)
 
 
         return Response(

@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import Customer, ProfileImage, Suburb
 from apps.users.views import request_otp
+from apps.notifications.services import queue_package_customer_notification
 from ..serializers.package_serializers import (
     CurrentPackageStatusSerializer,
     ErrorResponseSerializer,
@@ -38,6 +39,9 @@ from ..services.package_pricing import (
     calculate_package_price,
 )
 from ..services.package_cancellation import can_cancel_package
+from ..services.package_assignment import assign_pending_packages_safely
+from ..services.package_expiration import pickup_date, refund_status_for
+from ..services.current_package_updates import notify_current_packages_changed
 from ..services.package_access import (
     package_confirmation_code_for_user,
     package_initiator_user_id,
@@ -57,6 +61,31 @@ class PackageListPagination(PageNumberPagination):
 
 class PackageViewSet(ViewSet):
     ACTIVE_PACKAGE_STATUSES = {"Pending", "Assigned", "In Transit"}
+
+    @extend_schema(tags=["intracity/Packages"], request={"application/json": {"type": "object", "properties": {"package_id": {"type": "integer"}}, "required": ["package_id"]}})
+    @transaction.atomic
+    def renew_package(self, request):
+        package_id = request.data.get("package_id")
+        if not str(package_id).isdigit():
+            return Response({"error": "package_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        package = Package.objects.select_for_update().filter(pk=package_id).first()
+        if not package:
+            return Response({"error": "Package not found"}, status=status.HTTP_404_NOT_FOUND)
+        if request.user.id != package_initiator_user_id(package):
+            return Response({"error": "Only the original booking initiator can renew this package"}, status=status.HTTP_403_FORBIDDEN)
+        current_status = (PackageStatus.objects.filter(package=package)
+                          .order_by("-updated_at", "-pk").values_list("status", flat=True).first())
+        if current_status != "Expired" or package.is_renewed:
+            return Response({"error": "Package cannot be renewed", "current_status": current_status}, status=status.HTTP_409_CONFLICT)
+        package.is_renewed = True
+        package.renewed_at = timezone.now()
+        package.save(update_fields=["is_renewed", "renewed_at"])
+        PackageStatus.objects.create(package=package, status="Pending")
+        notify_current_packages_changed(package=package, reason="renewed")
+        queue_package_customer_notification(package=package, event_type="package.renewed")
+        transaction.on_commit(assign_pending_packages_safely)
+        return Response({"package_id": package.id, "status": "Pending", "is_renewed": True,
+                         "pickup_date": pickup_date(package).isoformat()}, status=status.HTTP_200_OK)
 
     def get_permissions(self):
         if self.action in {
@@ -177,6 +206,7 @@ class PackageViewSet(ViewSet):
         delivered_at = package.delivered_at or status_map.get("Delivered")
         collected_at = status_map.get("In Transit")
         cancelled_at = status_map.get("Cancelled")
+        expired_at = status_map.get("Expired")
 
         payload = {
             "package_id": package.id,
@@ -195,7 +225,12 @@ class PackageViewSet(ViewSet):
             "can_cancel": can_cancel_package(
                 invoice=invoice,
                 current_status=current_status,
-            ),
+            ) and (current_status != "Expired" or request.user.id == package_initiator_user_id(package)),
+            "is_renewed": package.is_renewed,
+            "can_renew": current_status == "Expired" and not package.is_renewed and request.user.id == package_initiator_user_id(package),
+            "expired_at": expired_at,
+            "pickup_date": pickup_date(package),
+            "refund_status": refund_status_for(package),
             "is_delivered": delivered_at is not None,
             "delivered_at": delivered_at,
         }
@@ -438,6 +473,7 @@ class PackageViewSet(ViewSet):
         delivered_at = package.delivered_at or status_map.get("Delivered")
         collected_at = status_map.get("In Transit")
         cancelled_at = status_map.get("Cancelled")
+        expired_at = status_map.get("Expired")
         assigned_at = status_map.get("Assigned")
         latest_status = status_records[-1] if status_records else None
         current_status = latest_status.status if latest_status else "Pending"
@@ -478,7 +514,12 @@ class PackageViewSet(ViewSet):
                     "can_cancel": can_cancel_package(
                         invoice=invoice,
                         current_status=current_status,
-                    ),
+                    ) and (current_status != "Expired" or requester_user_id == package_initiator_user_id(package)),
+                    "is_renewed": package.is_renewed,
+                    "can_renew": current_status == "Expired" and not package.is_renewed and requester_user_id == package_initiator_user_id(package),
+                    "expired_at": expired_at,
+                    "pickup_date": pickup_date(package),
+                    "refund_status": refund_status_for(package),
                     "is_delivered": delivered_at is not None,
                     "delivered_at": delivered_at,
                 },
@@ -501,6 +542,7 @@ class PackageViewSet(ViewSet):
         delivered_at = package.delivered_at or status_map.get("Delivered")
         collected_at = status_map.get("In Transit")
         cancelled_at = status_map.get("Cancelled")
+        expired_at = status_map.get("Expired")
         current_status = (
             status_records[-1].status if status_records else "Pending"
         )
@@ -573,7 +615,12 @@ class PackageViewSet(ViewSet):
                 "can_cancel": can_cancel_package(
                     invoice=invoice,
                     current_status=current_status,
-                ),
+                ) and (current_status != "Expired" or requester_user_id == package_initiator_user_id(package)),
+                "is_renewed": package.is_renewed,
+                "can_renew": current_status == "Expired" and not package.is_renewed and requester_user_id == package_initiator_user_id(package),
+                "expired_at": expired_at,
+                "pickup_date": pickup_date(package),
+                "refund_status": refund_status_for(package),
                 "is_delivered": delivered_at is not None,
                 "delivered_at": delivered_at,
                 "invoice_amount": invoice.amount if invoice else None,
@@ -772,9 +819,13 @@ class PackageViewSet(ViewSet):
             )
             .filter(
                 Q(sender=customer) | Q(receiver=customer),
-                added_at__date=timezone.localdate(),
             )
             .annotate(current_status=Subquery(latest_status))
+            .filter(
+                Q(is_renewed=False, added_at__date=timezone.localdate())
+                | Q(is_renewed=True, renewed_at__date=timezone.localdate())
+                | Q(current_status="In Transit")
+            )
             .exclude(current_status="Cancelled")
             .annotate(
                 current_package_priority=Case(

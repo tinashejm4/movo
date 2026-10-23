@@ -251,11 +251,18 @@ def _build_celery_broker_url() -> str:
     return f"{scheme}://{auth_segment}{host}:{port}/{database}{ssl_query}"
 
 
+from celery.schedules import crontab
+
 CELERY_BROKER_URL = _build_celery_broker_url()
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_TIME_LIMIT = 60
+CELERY_TIMEZONE = "Africa/Harare"
 CELERY_BEAT_SCHEDULE = {
+    'expire-uncollected-packages': {
+        'task': 'apps.intracity.tasks.expire_uncollected_packages_task',
+        'schedule': crontab(minute='10,40', hour=0),
+    },
     'clock-out-finished-driver-shifts': {
         'task': 'apps.transporters.tasks.clock_out_finished_shifts',
         'schedule': 60.0,

@@ -3,7 +3,7 @@ import logging
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Case, DateTimeField, F, OuterRef, Q, Subquery, When
 from django.utils import timezone
 
 from apps.users.models import Biker, Contact,ProfileImage
@@ -69,10 +69,17 @@ def assign_pending_packages():
 
     pending_packages = list(
         Package.objects.select_for_update()
-        .filter(added_at__date=timezone.localdate())
+        .filter(
+            Q(is_renewed=False, added_at__date=timezone.localdate())
+            | Q(is_renewed=True, renewed_at__date=timezone.localdate())
+        )
         .annotate(status=Subquery(latest_status))
         .filter(status="Pending")
-        .order_by("-is_fast_delivery", "added_at")
+        .annotate(queue_at=Case(
+            When(is_renewed=True, then=F("renewed_at")),
+            default=F("added_at"), output_field=DateTimeField(),
+        ))
+        .order_by("-is_renewed", "-is_fast_delivery", "queue_at", "pk")
     )
 
     if not pending_packages:

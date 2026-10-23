@@ -48,7 +48,13 @@ class DropoffPackageRequestSerializer(serializers.Serializer):
     captured_at = serializers.DateTimeField(required=False)
 
     def validate(self, attrs):
-        return validate_handover_fields(attrs)
+        if attrs["cash_received"] or {"request_id", "assignment_id", "image_id"}.intersection(attrs):
+            missing = {"request_id", "assignment_id"}.difference(attrs)
+            if missing:
+                raise serializers.ValidationError(
+                    {field: "Required for a handover" for field in missing}
+                )
+        return attrs
 
 
 def validate_handover_fields(attrs):
