@@ -17,7 +17,7 @@ from .current_package_updates import notify_current_packages_changed
 logger = logging.getLogger(__name__)
 
 def is_biker_busy(biker):
-    """Return whether a biker has a package awaiting collection or in transit."""
+    """Return whether a biker already has an active package."""
     now = timezone.now()
     if not shift_allows_work(effective_shift(biker, timezone.localdate(now)), now):
         return True
@@ -40,10 +40,7 @@ def is_biker_busy(biker):
     return (
         Package.objects.filter(biker=biker)
         .annotate(current_status=Subquery(latest_status))
-        .filter(
-            Q(current_status="In Transit")
-            | Q(current_status="Assigned", added_at__date=timezone.localdate(now))
-        )
+        .filter(current_status__in=["Pending", "Assigned", "In Transit"])
         .exists()
     )
 
