@@ -162,8 +162,12 @@ def process_handover(*, package_id, biker_user, stage, code, request_id=None,
                 pk=image_id, package=package, assignment=assignment,
                 uploaded_by=biker_user, stage=stage,
             ).first()
-        if assignment is None or (stage == "pickup" and image is None) or (image_id is not None and image is None):
-            return 400, {"error": "Valid assignment_id and pickup image_id are required"}
+        if assignment is None:
+            return 400, {"error": "Valid assignment_id is required"}
+        if stage == "pickup" and image is None:
+            return 400, {"error": "Valid pickup image_id is required"}
+        if image_id is not None and image is None:
+            return 400, {"error": "Valid image_id is required for this stage"}
         if image is not None and HandoverAttempt.objects.filter(
             image=image, outcome__in=["accepted", "conflict"]
         ).exists():
