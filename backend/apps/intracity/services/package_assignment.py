@@ -3,7 +3,7 @@ import logging
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Case, DateTimeField, F, OuterRef, Q, Subquery, When
 from django.utils import timezone
 
 from apps.users.models import Biker, Contact,ProfileImage
@@ -17,7 +17,7 @@ from .current_package_updates import notify_current_packages_changed
 logger = logging.getLogger(__name__)
 
 def is_biker_busy(biker):
-    """Return whether a biker has a package awaiting collection or in transit."""
+    """Return whether a biker already has an active package."""
     now = timezone.now()
     if not shift_allows_work(effective_shift(biker, timezone.localdate(now)), now):
         logger.warning("Biker %s is not allowed to work at this time", biker)
@@ -44,10 +44,7 @@ def is_biker_busy(biker):
     return (
         Package.objects.filter(biker=biker, added_at__date=timezone.localdate(now))
         .annotate(current_status=Subquery(latest_status))
-        .filter(
-            Q(current_status="In Transit")
-            | Q(current_status="Assigned")
-        )
+        .filter(current_status__in=["Pending", "Assigned", "In Transit"])
         .exists()
     )
 
@@ -73,10 +70,17 @@ def assign_pending_packages():
 
     pending_packages = list(
         Package.objects.select_for_update()
-        .filter(added_at__date=timezone.localdate())
+        .filter(
+            Q(is_renewed=False, added_at__date=timezone.localdate())
+            | Q(is_renewed=True, renewed_at__date=timezone.localdate())
+        )
         .annotate(status=Subquery(latest_status))
         .filter(status="Pending")
-        .order_by("-is_fast_delivery", "added_at")
+        .annotate(queue_at=Case(
+            When(is_renewed=True, then=F("renewed_at")),
+            default=F("added_at"), output_field=DateTimeField(),
+        ))
+        .order_by("-is_renewed", "-is_fast_delivery", "queue_at", "pk")
     )
 
     if not pending_packages:

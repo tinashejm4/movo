@@ -14,6 +14,8 @@ from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.package_assignment import assign_pending_packages
 from ..services.package_cancellation import can_cancel_package
 from ..services.package_access import package_user_can_cancel
+from ..services.package_access import package_initiator_user_id
+from ..services.package_expiration import ensure_refund_review
 from ..services.current_package_updates import notify_current_packages_changed
 import logging
 from ..serializers.delivery_serializers import (
@@ -74,30 +76,33 @@ class DeliveryViewSet(ViewSet):
             )
 
         package = get_object_or_404(
-            Package.objects.select_for_update().select_related(
-                "sender__user", "receiver__user", "invoice"
+            Package.objects.select_for_update(of=("self",)).select_related(
+                "sender__user", "receiver__user"
             ),
             id=package_id,
         )
 
-        invoice = getattr(package, "invoice", None)
-        if not package_user_can_cancel(package, invoice, request.user.id):
+        invoice = Invoice.objects.select_for_update().filter(package=package).first()
+        current_status = (
+            PackageStatus.objects.filter(package=package)
+            .order_by("-updated_at", "-pk").values_list("status", flat=True).first()
+        )
+        authorized = (
+            request.user.id == package_initiator_user_id(package)
+            if current_status == "Expired"
+            else package_user_can_cancel(package, invoice, request.user.id)
+        )
+        if not authorized:
             return Response(
                 {"error": "Only the customer who initiated or pays for the order can cancel it"},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        latest_status = (
-            PackageStatus.objects.filter(package=package)
-            .order_by("-updated_at", "-pk")
-            .first()
-        )
-        current_status = latest_status.status if latest_status else None
         if not can_cancel_package(
             invoice=invoice,
             current_status=current_status,
         ):
-            if invoice and invoice.is_paid:
+            if invoice and invoice.is_paid and current_status != "Expired":
                 return Response(
                     {"error": "Paid orders cannot be cancelled"},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -108,6 +113,7 @@ class DeliveryViewSet(ViewSet):
             )
 
         PackageStatus.objects.create(package=package, status="Cancelled", comments=reason)
+        refund_review = ensure_refund_review(package) if current_status == "Expired" else None
         notify_current_packages_changed(package=package, reason="cancelled")
         queue_package_customer_notification(
             package=package,
@@ -122,7 +128,7 @@ class DeliveryViewSet(ViewSet):
             }
         )
         return Response(
-            serializer.data,
+            {**serializer.data, "refund_status": refund_review.status if refund_review else None},
             status=status.HTTP_200_OK,
         )
 

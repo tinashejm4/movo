@@ -42,12 +42,15 @@ from apps.adminportal.views.accounts import (
 from .views.delivery_order_views import DeliveryPageView
 from .views.driver_shift_views import WeeklyShiftsView, WeeklyShiftDetailView, DriverExceptionsView, DriverExceptionDetailView, DriverShiftReminderView
 from .views.handover_review_views import HandoverReviewListView, HandoverReviewResolveView
+from .views.refund_review_views import RefundReviewListView, RefundReviewResolveView
 
 delivery_metrics = DeliveryPageView.as_view({"get": "delivery_metrics"})
 delivery_order_list = DeliveryPageView.as_view({"get": "delivery_order_list"})
 today_delivery_metrics = DeliveryPageView.as_view({"get": "today_delivery_metrics"})
 
 urlpatterns = [
+    path("refund-reviews/", RefundReviewListView.as_view(), name="admin_refund_reviews"),
+    path("refund-reviews/<int:review_id>/resolve/", RefundReviewResolveView.as_view(), name="admin_refund_review_resolve"),
     path("handover-reviews/", HandoverReviewListView.as_view(), name="admin_handover_reviews"),
     path("handover-reviews/<uuid:attempt_id>/resolve/", HandoverReviewResolveView.as_view(), name="admin_handover_review_resolve"),
     path("driver-shifts/reminder/", DriverShiftReminderView.as_view(), name="admin_driver_shift_reminder"),

@@ -37,10 +37,12 @@ remains available during the driver app rollout.
 Use the existing `POST /api/transporters/pickup-package/` with `sender_code`,
 or `POST /api/transporters/dropoff-package/` with `receiver_code`. New app
 requests also send `package_id`, `request_id` (UUID), `assignment_id` (UUID),
-`image_id`, and `cash_received` (boolean). `captured_at` is optional and is
-audit metadata, not proof of when the handover occurred. All three identity
-fields are required together. A cash handover sends `cash_received: true` in
-this POST; the app does not first call `confirm-cash-received/`.
+and `cash_received` (boolean). `image_id` is required for pickup POD, and is
+optional for dropoff. `captured_at` is optional and is audit metadata, not
+proof of when the handover occurred. For offline identity fields, `request_id`
+and `assignment_id` are required together. A cash handover sends
+`cash_received: true` in this POST; the app does not first call
+`confirm-cash-received/`.
 
 The server verifies the code, photo ownership, assignment, stage, and invoice.
 It commits cash and the package transition together. A successful retry with
@@ -55,7 +57,7 @@ accepted response or `review_status: "rejected"`. Staff can inspect cases throug
 (`accept` or `reject`) and a required `reason`. Acceptance never overrides a
 cancelled package or another driver's assignment.
 
-Upload the pickup image and submit pickup before doing the same for dropoff.
+Upload a pickup image, then submit pickup. Dropoff does not require a POD image.
 Keep the photo binary and request UUIDs in the client queue until the server
 confirms or staff resolves the attempt. The queue must also retain the entered
 six digit code securely until sync so the server can verify it independently;
