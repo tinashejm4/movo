@@ -10,7 +10,7 @@ from django.db import transaction
 logger = logging.getLogger(__name__)
 
 CURRENT_PACKAGE_UPDATE_REASONS = frozenset(
-    {"created", "assigned", "picked_up", "cancelled", "delivered"}
+    {"created", "assigned", "picked_up", "cancelled", "delivered", "expired", "renewed"}
 )
 
 

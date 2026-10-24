@@ -100,7 +100,7 @@ class OfflineHandoverTests(APITestCase):
                     "012345" if stage == "pickup" else "654321",
                 "request_id": str(request_id),
                 "assignment_id": str((assignment or self.assignment).pk),
-                "image_id": image_id,
+                **({"image_id": image_id} if image_id is not None else {}),
                 "cash_received": cash_received,
             }, format="json",
         )
@@ -163,9 +163,10 @@ class OfflineHandoverTests(APITestCase):
         )
         self.assertEqual(changed.status_code, 409)
 
-        dropoff_image, _ = self.upload("dropoff")
-        delivered, _ = self.handover("dropoff", dropoff_image.data["id"])
+        delivered, dropoff_request_id = self.handover("dropoff", None)
         self.assertEqual(delivered.status_code, 200)
+        self.assertIsNone(HandoverAttempt.objects.get(pk=dropoff_request_id).image_id)
+        self.assertEqual(PackageImage.objects.count(), 1)
         self.assertEqual(PackageStatus.objects.filter(package=self.package, status="Delivered").count(), 1)
 
     def test_pay_forward_cash_is_recorded_with_dropoff(self):
@@ -177,14 +178,31 @@ class OfflineHandoverTests(APITestCase):
         self.invoice.refresh_from_db()
         self.assertFalse(self.invoice.is_paid)
 
-        dropoff_image, _ = self.upload("dropoff")
         delivered, _ = self.handover(
-            "dropoff", dropoff_image.data["id"], cash_received=True
+            "dropoff", None, cash_received=True
         )
         self.assertEqual(delivered.status_code, 200)
         self.invoice.refresh_from_db()
         self.assertTrue(self.invoice.is_paid)
         self.assertEqual(IntracitySale.objects.filter(invoice=self.invoice).count(), 1)
+
+    def test_image_free_dropoff_conflict_is_visible_to_staff(self):
+        self.invoice.is_paid = True
+        self.invoice.save(update_fields=["is_paid"])
+        pickup_image, _ = self.upload("pickup")
+        picked_up, _ = self.handover("pickup", pickup_image.data["id"])
+        self.assertEqual(picked_up.status_code, 200)
+        PackageStatus.objects.create(package=self.package, status="Cancelled")
+
+        conflict, request_id = self.handover("dropoff", None)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertIsNone(HandoverAttempt.objects.get(pk=request_id).image_id)
+
+        self.client.force_authenticate(user=self.staff_user)
+        review = self.client.get(reverse("admin_handover_reviews"))
+        self.assertEqual(review.status_code, 200)
+        self.assertEqual(review.data["results"][0]["id"], str(request_id))
+        self.assertIsNone(review.data["results"][0]["image_url"])
 
     def test_pod_fields_are_required_together(self):
         response = self.client.post(

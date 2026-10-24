@@ -231,7 +231,7 @@ class AutomaticPackageAssignmentTests(APITestCase):
         self.assertTrue(is_biker_busy(biker))
 
     @patch("apps.intracity.services.package_assignment._publish_assignments")
-    def test_previous_day_uncollected_assignment_does_not_block_today(
+    def test_previous_day_uncollected_assignment_blocks_new_assignment(
         self, publish_assignments
     ):
         biker = Biker.objects.create(
@@ -264,7 +264,7 @@ class AutomaticPackageAssignmentTests(APITestCase):
         )
         PackageStatus.objects.create(package=package, status="Assigned")
 
-        self.assertFalse(is_biker_busy(biker))
+        self.assertTrue(is_biker_busy(biker))
 
         today_package = Package.objects.create(
             sender=self.sender,
@@ -282,8 +282,8 @@ class AutomaticPackageAssignmentTests(APITestCase):
         result = assign_pending_packages()
 
         today_package.refresh_from_db()
-        self.assertEqual(result["assigned_count"], 1)
-        self.assertEqual(today_package.biker_id, biker.id)
+        self.assertEqual(result["assigned_count"], 0)
+        self.assertIsNone(today_package.biker_id)
         publish_assignments.assert_not_called()
 
     @patch("apps.intracity.services.package_assignment._publish_assignments")
@@ -325,4 +325,3 @@ class AutomaticPackageAssignmentTests(APITestCase):
         self.assertEqual(result["assigned_count"], 0)
         self.assertIsNone(package.biker_id)
         publish_assignments.assert_not_called()
-

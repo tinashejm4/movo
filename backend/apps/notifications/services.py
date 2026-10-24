@@ -10,6 +10,8 @@ EVENT_COPY = {
     "package.picked_up": ("Package collected", "Your package has been collected and is on its way."),
     "package.delivered": ("Package delivered", "Your package has been delivered."),
     "package.cancelled": ("Package cancelled", "This package has been cancelled."),
+    "package.expired": ("Pickup window expired", "Your package was not collected. You can renew it once or cancel it."),
+    "package.renewed": ("Package renewed", "Your package is back in the pickup queue for today."),
 }
 
 logger = logging.getLogger(__name__)

@@ -42,6 +42,8 @@ class Package(models.Model):
     assigned_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
     added_at = models.DateTimeField(auto_now_add=True)
+    is_renewed = models.BooleanField(default=False)
+    renewed_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.id} {self.sender} to {self.receiver}"
@@ -81,6 +83,7 @@ class PackageStatus(models.Model):
         ("In Transit", "In Transit"),
         ("Delivered", "Delivered"),
         ("Cancelled", "Cancelled"),
+        ("Expired", "Expired"),
     ]
 
     package = models.ForeignKey(Package, on_delete=models.CASCADE)
@@ -110,7 +113,7 @@ class HandoverAttempt(models.Model):
     package = models.ForeignKey(Package, on_delete=models.CASCADE)
     biker = models.ForeignKey(Biker, on_delete=models.CASCADE)
     assignment = models.ForeignKey(PackageAssignment, on_delete=models.CASCADE)
-    image = models.ForeignKey(PackageImage, on_delete=models.PROTECT)
+    image = models.ForeignKey(PackageImage, on_delete=models.PROTECT, null=True, blank=True)
     stage = models.CharField(max_length=10)
     cash_received = models.BooleanField(default=False)
     fingerprint = models.CharField(max_length=64)
@@ -153,6 +156,21 @@ class Invoice(models.Model):
         if self.exchange_rate:
             return float(self.amount) * float(self.exchange_rate.rate)
         return None
+
+
+class RefundReview(models.Model):
+    OUTCOMES = [("pending_review", "Pending review"), ("refunded", "Refunded"), ("rejected", "Rejected")]
+
+    invoice = models.OneToOneField(Invoice, on_delete=models.PROTECT, related_name="refund_review")
+    recipient = models.ForeignKey(Customer, on_delete=models.PROTECT)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_method = models.CharField(max_length=20)
+    status = models.CharField(max_length=20, choices=OUTCOMES, default="pending_review")
+    reference = models.CharField(max_length=100, blank=True)
+    note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 
 
 class Price(models.Model):

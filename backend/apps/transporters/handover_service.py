@@ -157,13 +157,18 @@ def process_handover(*, package_id, biker_user, stage, code, request_id=None,
         assignment = PackageAssignment.objects.filter(
             pk=assignment_id, package=package, biker=biker
         ).first()
-        image = PackageImage.objects.filter(
-            pk=image_id, package=package, assignment=assignment,
-            uploaded_by=biker_user, stage=stage,
-        ).first()
-        if assignment is None or image is None:
-            return 400, {"error": "Valid assignment_id and image_id are required"}
-        if HandoverAttempt.objects.filter(
+        if image_id is not None:
+            image = PackageImage.objects.filter(
+                pk=image_id, package=package, assignment=assignment,
+                uploaded_by=biker_user, stage=stage,
+            ).first()
+        if assignment is None:
+            return 400, {"error": "Valid assignment_id is required"}
+        if stage == "pickup" and image is None:
+            return 400, {"error": "Valid pickup image_id is required"}
+        if image_id is not None and image is None:
+            return 400, {"error": "Valid image_id is required for this stage"}
+        if image is not None and HandoverAttempt.objects.filter(
             image=image, outcome__in=["accepted", "conflict"]
         ).exists():
             return 409, {"error": "POD image is already linked to another handover"}
@@ -250,7 +255,7 @@ def resolve_handover_attempt(*, attempt_id, reviewer, action, reason):
     ).order_by("-assigned_at", "-pk").first()
     if latest_assignment is None or latest_assignment.pk != attempt.assignment_id:
         return 409, {"error": "Assignment is still changed"}
-    if not attempt.code_valid or not attempt.image_id:
+    if not attempt.code_valid or (attempt.stage == "pickup" and not attempt.image_id):
         return 409, {"error": "Code or POD has not been verified"}
     result_status, data, conflict_reason = _transition(
         package, stage=attempt.stage, biker_user=attempt.biker.user,

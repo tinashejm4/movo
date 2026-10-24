@@ -83,7 +83,7 @@ def package_is_cancelled(package):
         .values_list("status", flat=True)
         .first()
     )
-    return latest_status == "Cancelled"
+    return latest_status in {"Cancelled", "Expired"}
 
 
 def invoice_user_can_pay(invoice, user_id):
