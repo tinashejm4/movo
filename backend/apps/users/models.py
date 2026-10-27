@@ -89,15 +89,15 @@ class OTP(models.Model):
     username = models.CharField(max_length=150)
     otp_code = models.CharField(max_length=6)
     expiry_time = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        minutes_to_add = 25
-        self.expiry_time = timezone.now() + timedelta(minutes=minutes_to_add)  # Set expiry time to 5 minutes from now
+  # Set expiry time to 5 minutes from now
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.username} - {self.otp_code}'
+        return f'{self.username} - {self.otp_code} - {"used" if self.is_used else "unused"}'
 
 # ______________________________________________________________________________________
 
