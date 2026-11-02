@@ -265,12 +265,40 @@ paths:
     post:
       operationId: intracity_cancel_order_create
       tags:
-      - intracity
+      - Deliveries
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+        required: true
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          description: Order cancelled successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelOrderResponse'
+        '400':
+          description: Order cannot be cancelled or request parameters are incorrect.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryErrorResponse'
+        '403':
+          description: User is not authorized to cancel this order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryErrorResponse'
   /api/intracity/create-package/:
     get:
       operationId: intracity_create_package_retrieve
@@ -422,6 +450,44 @@ paths:
           description: No response body
 components:
   schemas:
+    CancelOrderRequest:
+      type: object
+      properties:
+        package_id:
+          type: integer
+          description: ID of the package to cancel.
+        reason:
+          type: string
+          nullable: true
+          description: Optional cancellation reason.
+      required:
+      - package_id
+    CancelOrderResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        package_id:
+          type: integer
+        status:
+          type: string
+          example: Cancelled
+        refund_status:
+          type: string
+          nullable: true
+          description: Refund review status when cancellation follows expiration; otherwise null.
+      required:
+      - message
+      - package_id
+      - status
+      - refund_status
+    DeliveryErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+      - error
     TokenRefresh:
       type: object
       properties:
