@@ -50,6 +50,7 @@ class CancelOrderResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
     package_id = serializers.IntegerField()
     status = serializers.CharField()
+    refund_status = serializers.CharField(allow_null=True)
 
 class IsBikerAssignedRequestSerializer(serializers.Serializer):
     package_id = serializers.IntegerField()

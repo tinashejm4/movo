@@ -61,6 +61,10 @@ class DeliveryViewSet(ViewSet):
                 DeliveryErrorResponseSerializer,
                 description="User is not assigned to this package",
             ),
+            404: OpenApiResponse(
+                DeliveryErrorResponseSerializer,
+                description="Package was not found",
+            ),
         },
     )
     @transaction.atomic
@@ -125,12 +129,10 @@ class DeliveryViewSet(ViewSet):
                 "message": f"Order cancelled successfully because: {reason}",
                 "package_id": package.id,
                 "status": "Cancelled",
+                "refund_status": refund_review.status if refund_review else None,
             }
         )
-        return Response(
-            {**serializer.data, "refund_status": refund_review.status if refund_review else None},
-            status=status.HTTP_200_OK,
-        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["Deliveries"],
