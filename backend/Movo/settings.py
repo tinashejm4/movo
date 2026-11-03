@@ -79,6 +79,8 @@ INSTALLED_APPS = [
     "apps.transporters.apps.TransportersConfig",
     "apps.adminportal.apps.AdminPortalConfig",
     "apps.health.apps.HealthConfig",
+    "apps.vehicles.apps.VehiclesConfig",
+    
 ]
 
 MIDDLEWARE = [
