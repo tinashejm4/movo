@@ -1,6 +1,7 @@
 from django.test import TestCase
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.urls import reverse
@@ -10,6 +11,7 @@ from rest_framework.test import APITestCase
 
 from apps.intracity.models import Package, PackageStatus
 from apps.users.models import Branch, Biker, City, Customer, Staff
+from apps.transporters.models import BikerDailySession
 
 
 class DeliveryMetricsViewTests(APITestCase):
@@ -96,3 +98,56 @@ class DeliveryMetricsViewTests(APITestCase):
 		self.assertEqual(reversed_dates.status_code, status.HTTP_400_BAD_REQUEST)
 
 # Create your tests here.
+
+
+class BikerStatisticsViewTests(APITestCase):
+	def setUp(self):
+		self.user = User.objects.create_user(username="biker-statistics-admin")
+		branch = Branch.objects.create(name="Main", address="Main street")
+		Staff.objects.create(user=self.user, branch=branch, position="Manager")
+		self.active_biker = Biker.objects.create(
+			user=User.objects.create_user(username="on-shift")
+		)
+		self.outside_shift_biker = Biker.objects.create(
+			user=User.objects.create_user(username="outside-shift")
+		)
+		self.inactive_biker = Biker.objects.create(
+			user=User.objects.create_user(username="off-shift")
+		)
+		today = timezone.localdate()
+		BikerDailySession.objects.create(
+			biker=self.active_biker,
+			date=today,
+			start_time=timezone.now(),
+			is_active=True,
+		)
+		BikerDailySession.objects.create(
+			biker=self.outside_shift_biker,
+			date=today,
+			start_time=timezone.now(),
+			is_active=True,
+		)
+		BikerDailySession.objects.create(
+			biker=self.inactive_biker,
+			date=today,
+			start_time=timezone.now(),
+			is_active=False,
+		)
+
+	@patch("apps.adminportal.views.bikers_views.shift_allows_work", side_effect=[True, False])
+	@patch(
+		"apps.adminportal.views.bikers_views.effective_shift",
+		return_value={"is_open": True},
+	)
+	def test_counts_current_active_shifts_and_treats_others_as_inactive(
+		self, _effective_shift, _shift_allows_work
+	):
+		self.client.force_authenticate(user=self.user)
+
+		response = self.client.get(reverse("biker_statistics_view"))
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(
+			response.data,
+			{"total_bikers": 3, "active_bikers": 1, "inactive_bikers": 2},
+		)
