@@ -1,18 +1,19 @@
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import viewsets
-from backend.apps.vehicles.models import (
+from ..models import (
     Vehicle,
 )
-from backend.apps.vehicles.serializers import (
+from ..serializers import (
     VehicleSerializer,
 )
+from apps.users.permissions import IsStaff
 
 
 class VehicleViewSet(viewsets.ModelViewSet):
     
     serializer_class = VehicleSerializer
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsStaff]
     
     def get_queryset(self):
         return Vehicle.objects.all()
