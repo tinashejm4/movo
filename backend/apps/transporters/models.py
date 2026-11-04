@@ -1,6 +1,8 @@
 from django.db import models
 
 from apps.users.models import Biker
+from apps.bookkeeping.models import Asset
+
 
 # Create your models here.
 class BikerDailySession(models.Model):
@@ -48,3 +50,34 @@ class DriverClockInterval(models.Model):
 
 class DriverShiftReminderSetting(models.Model):
     minutes_before_close = models.PositiveSmallIntegerField(default=30)
+
+
+class Vehicle(models.Model):
+    VEHICLE_TYPES = [
+        ('car', 'Car'),
+        ('truck', 'Truck'),
+        ('scooter', 'Scooter'),
+        ('motorcycle', 'Motorcycle'),
+        ('tricycle', 'Tricycle')
+    ]
+
+    vehicle_type = models.CharField(max_length=50, choices=VEHICLE_TYPES)
+    make = models.CharField(max_length=100)
+    model = models.CharField(max_length=100)
+    year = models.PositiveSmallIntegerField()
+    license_plate = models.CharField(max_length=20, unique=True)
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='vehicles')
+
+    def __str__(self):
+        return f'{self.make} {self.model} ({self.license_plate})'
+
+class MileageRecord(models.Model):
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='mileage_records')
+    mileage = models.PositiveIntegerField()
+    added_at = models.DateField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('vehicle', 'added_at')
+
+    def __str__(self):
+        return f'{self.vehicle} - {self.added_at} - {self.mileage}'

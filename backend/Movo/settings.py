@@ -50,6 +50,13 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# HOSTNAME is often set by the OS/container to the machine name, so always
+# allow local hosts during development.
+if DEBUG:
+    ALLOWED_HOSTS += [
+        h for h in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]") if h not in ALLOWED_HOSTS
+    ]
+
 
 # Application definition
 
