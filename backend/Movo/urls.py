@@ -36,8 +36,9 @@ def get_server_version(request):
     date = "24-09-2026"  # Example date
     change_log = [
         "Added version endpoint to retrieve server version and date.",
+        "Added change log to server version response."
     ]
-    return JsonResponse({"server_version": server_version, "date": date})
+    return JsonResponse({"server_version": server_version, "date": date, "change_log": change_log})
 
 app_urlpatterns = [
     path("api/notifications/", include("apps.notifications.urls")),
@@ -47,6 +48,7 @@ app_urlpatterns = [
     path("api/bookkeeping/", include("apps.bookkeeping.urls")),
     path("api/adminportal/", include("apps.adminportal.urls")),
     path("api/health/", include("apps.health.urls")),
+    path("api/vehicles/", include("apps.vehicles.urls")),
 ]
 
 app_urlpatterns += [path("api/health/", health), path("api/server-version/", get_server_version)]
