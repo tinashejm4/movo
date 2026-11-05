@@ -213,6 +213,35 @@ class WeeklyShiftDetailView(APIView):
         return Response({'weekday': weekday, **shift_payload(shift)})
 
 
+class DriverShiftExceptionOverviewSerializer(ShiftFieldsSerializer):
+    biker_user_id = serializers.IntegerField()
+    biker_name = serializers.CharField()
+    date = serializers.DateField()
+
+
+class DriverShiftExceptionOverviewView(APIView):
+    permission_classes = [IsAuthenticated, IsStaff]
+
+    @extend_schema(
+        tags=["Admin/Driver Shifts"],
+        summary="List shift exceptions across all drivers",
+        responses={200: DriverShiftExceptionOverviewSerializer(many=True), **AUTH_ERROR_RESPONSES},
+    )
+    def get(self, request):
+        exceptions = DriverShiftException.objects.select_related("biker__user").order_by("date", "biker__user__first_name", "biker__user__last_name")
+        results = []
+        for exception in exceptions:
+            user = exception.biker.user
+            name = user.get_full_name().strip() or user.username
+            results.append({
+                "biker_user_id": user.pk,
+                "biker_name": name,
+                "date": exception.date,
+                **shift_payload(exception),
+            })
+        return Response(results)
+
+
 class DriverExceptionsView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
 

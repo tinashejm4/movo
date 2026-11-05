@@ -11,7 +11,7 @@ from rest_framework.test import APITestCase
 
 from apps.intracity.models import Package, PackageStatus
 from apps.users.models import Branch, Biker, City, Customer, Staff
-from apps.transporters.models import BikerDailySession
+from apps.transporters.models import BikerDailySession, DriverShiftException
 
 
 class DeliveryMetricsViewTests(APITestCase):
@@ -151,3 +151,48 @@ class BikerStatisticsViewTests(APITestCase):
 			response.data,
 			{"total_bikers": 3, "active_bikers": 1, "inactive_bikers": 2},
 		)
+
+
+class DriverShiftExceptionOverviewTests(APITestCase):
+	def setUp(self):
+		self.staff_user = User.objects.create_user(username="shift-overview-staff", first_name="Shift", last_name="Manager")
+		branch = Branch.objects.create(name="Shift Branch", address="Main street")
+		Staff.objects.create(user=self.staff_user, branch=branch, position="Manager")
+		self.first_biker = Biker.objects.create(user=User.objects.create_user(username="driver-one"))
+		self.second_user = User.objects.create_user(username="driver-two", first_name="Taylor", last_name="Driver")
+		self.second_biker = Biker.objects.create(user=self.second_user)
+
+	def test_requires_staff_authentication(self):
+		url = reverse("admin_driver_shift_exception_overview")
+		self.assertEqual(self.client.get(url).status_code, status.HTTP_401_UNAUTHORIZED)
+		self.client.force_authenticate(user=User.objects.create_user(username="not-staff"))
+		self.assertEqual(self.client.get(url).status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_returns_all_drivers_exceptions_with_expected_fields(self):
+		DriverShiftException.objects.create(
+			biker=self.first_biker,
+			date=timezone.localdate() + timedelta(days=1),
+			is_open=False,
+			start_time=None,
+			end_time=None,
+		)
+		DriverShiftException.objects.create(
+			biker=self.second_biker,
+			date=timezone.localdate() + timedelta(days=2),
+			is_open=True,
+			start_time="09:00",
+			end_time="15:00",
+		)
+		self.client.force_authenticate(user=self.staff_user)
+
+		response = self.client.get(reverse("admin_driver_shift_exception_overview"))
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(len(response.data), 2)
+		self.assertEqual(
+			set(response.data[0]),
+			{"biker_user_id", "biker_name", "date", "is_open", "start_time", "end_time"},
+		)
+		self.assertEqual(response.data[0]["biker_user_id"], self.first_biker.user_id)
+		self.assertEqual(response.data[0]["biker_name"], "driver-one")
+		self.assertEqual(response.data[1]["biker_name"], "Taylor Driver")
