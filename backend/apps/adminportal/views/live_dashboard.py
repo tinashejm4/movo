@@ -12,6 +12,18 @@ from apps.intracity.models import PackageStatus,Invoice, Package
 from apps.users.models import Biker, Branch, Customer, Suburb
 import django.utils.timezone as timezone
 from logging import getLogger
+from drf_spectacular.utils import extend_schema
+from rest_framework import serializers
+
+
+class BikerMetricSerializer(serializers.Serializer):
+    biker_id = serializers.IntegerField()
+    biker_name = serializers.CharField()
+    is_active = serializers.BooleanField()
+    is_busy = serializers.BooleanField()
+    started_at = serializers.DateTimeField(allow_null=True)
+    num_packages_assigned = serializers.IntegerField()
+    num_packages_delivered = serializers.IntegerField()
 
 class MainMetricsView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
@@ -56,6 +68,10 @@ class MainMetricsView(APIView):
 class BikerMetricsView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
 
+    @extend_schema(
+        tags=["Admin/Bikers"], operation_id="admin_bikers_metrics",
+        responses={200: BikerMetricSerializer(many=True)},
+    )
     def get(self, request):
         package_statuses = PackageStatus.objects.filter(package=OuterRef("pk"))
         latest_status = package_statuses.order_by("-updated_at", "-pk").values(

@@ -40,7 +40,7 @@ from apps.adminportal.views.accounts import (
 )
 
 from .views.delivery_order_views import DeliveryPageView
-from .views.driver_shift_views import WeeklyShiftsView, WeeklyShiftDetailView, DriverExceptionsView, DriverExceptionDetailView, DriverShiftReminderView
+from .views.driver_shift_views import WeeklyShiftsView, WeeklyShiftDetailView, DriverExceptionsView, DriverExceptionDetailView, DriverShiftReminderView, DriverShiftExceptionOverviewView
 from .views.handover_review_views import HandoverReviewListView, HandoverReviewResolveView
 from .views.refund_review_views import RefundReviewListView, RefundReviewResolveView
 
@@ -54,6 +54,7 @@ urlpatterns = [
     path("handover-reviews/", HandoverReviewListView.as_view(), name="admin_handover_reviews"),
     path("handover-reviews/<uuid:attempt_id>/resolve/", HandoverReviewResolveView.as_view(), name="admin_handover_review_resolve"),
     path("driver-shifts/reminder/", DriverShiftReminderView.as_view(), name="admin_driver_shift_reminder"),
+    path("driver-shift-exceptions/", DriverShiftExceptionOverviewView.as_view(), name="admin_driver_shift_exception_overview"),
     path("driver-shifts/", WeeklyShiftsView.as_view(), name="admin_driver_shifts"),
     path("driver-shifts/<int:weekday>/", WeeklyShiftDetailView.as_view(), name="admin_driver_shift_detail"),
     path("bikers/<int:biker_user_id>/shift-exceptions/", DriverExceptionsView.as_view(), name="admin_driver_shift_exceptions"),
