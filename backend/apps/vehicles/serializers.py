@@ -100,9 +100,41 @@ class ReassignVehicleInputSerializer(serializers.Serializer):
 
 
 class MileageRecordSerializer(serializers.ModelSerializer):
+    previous_odometer_km = serializers.IntegerField(read_only=True, allow_null=True)
+    distance_travelled_km = serializers.SerializerMethodField()
+    vehicle_name = serializers.SerializerMethodField()
+    vehicle_registration_number = serializers.CharField(source="vehicle.registration_number", read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    def get_distance_travelled_km(self, obj) -> int | None:
+        previous = getattr(obj, "previous_odometer_km", None)
+        return None if previous is None else obj.odometer_km - previous
+
+    def get_vehicle_name(self, obj) -> str:
+        return f"{obj.vehicle.make} {obj.vehicle.model}".strip()
+
+    def get_recorded_by_name(self, obj) -> str | None:
+        if obj.recorded_by is None:
+            return None
+        return obj.recorded_by.get_full_name().strip() or obj.recorded_by.get_username()
+
     class Meta:
         model = MileageRecord
-        fields = "__all__"
+        fields = (
+            "id",
+            "odometer_km",
+            "recorded_at",
+            "source",
+            "notes",
+            "created_at",
+            "vehicle",
+            "recorded_by",
+            "previous_odometer_km",
+            "distance_travelled_km",
+            "vehicle_name",
+            "vehicle_registration_number",
+            "recorded_by_name",
+        )
         read_only_fields = ("recorded_by", "created_at")
 
 
@@ -114,21 +146,106 @@ class FuelRecordSerializer(serializers.ModelSerializer):
 
 
 class ServiceRecordSerializer(serializers.ModelSerializer):
+    vehicle_name = serializers.SerializerMethodField()
+    vehicle_registration_number = serializers.CharField(source="vehicle.registration_number", read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    def get_vehicle_name(self, obj) -> str:
+        return f"{obj.vehicle.make} {obj.vehicle.model}".strip()
+
+    def get_recorded_by_name(self, obj) -> str | None:
+        if obj.recorded_by is None:
+            return None
+        return obj.recorded_by.get_full_name().strip() or obj.recorded_by.get_username()
+
     class Meta:
         model = ServiceRecord
-        fields = "__all__"
+        fields = (
+            "id",
+            "service_date",
+            "description",
+            "service_provider",
+            "odometer_km",
+            "cost",
+            "currency",
+            "next_service_date",
+            "next_service_odometer_km",
+            "notes",
+            "created_at",
+            "vehicle",
+            "recorded_by",
+            "vehicle_name",
+            "vehicle_registration_number",
+            "recorded_by_name",
+        )
         read_only_fields = ("recorded_by", "created_at")
 
 
 class InsurancePolicySerializer(serializers.ModelSerializer):
+    vehicle_name = serializers.SerializerMethodField()
+    vehicle_registration_number = serializers.CharField(source="vehicle.registration_number", read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    def get_vehicle_name(self, obj) -> str:
+        return f"{obj.vehicle.make} {obj.vehicle.model}".strip()
+
+    def get_recorded_by_name(self, obj) -> str | None:
+        if obj.recorded_by is None:
+            return None
+        return obj.recorded_by.get_full_name().strip() or obj.recorded_by.get_username()
+
     class Meta:
         model = InsurancePolicy
-        fields = "__all__"
+        fields = (
+            "id",
+            "insurer",
+            "policy_number",
+            "coverage_description",
+            "start_date",
+            "expiry_date",
+            "premium",
+            "currency",
+            "recorded_by",
+            "notes",
+            "created_at",
+            "vehicle",
+            "vehicle_name",
+            "vehicle_registration_number",
+            "recorded_by_name",
+        )
         read_only_fields = ("recorded_by", "created_at")
 
 
 class LicensingRecordSerializer(serializers.ModelSerializer):
+    vehicle_name = serializers.SerializerMethodField()
+    vehicle_registration_number = serializers.CharField(source="vehicle.registration_number", read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    def get_vehicle_name(self, obj) -> str:
+        return f"{obj.vehicle.make} {obj.vehicle.model}".strip()
+
+    def get_recorded_by_name(self, obj) -> str | None:
+        if obj.recorded_by is None:
+            return None
+        return obj.recorded_by.get_full_name().strip() or obj.recorded_by.get_username()
+
     class Meta:
         model = LicensingRecord
-        fields = "__all__"
+        fields = (
+            "id",
+            "licence_type",
+            "reference_number",
+            "issuing_authority",
+            "issue_date",
+            "expiry_date",
+            "cost",
+            "currency",
+            "recorded_by",
+            "notes",
+            "created_at",
+            "vehicle",
+            "vehicle_name",
+            "vehicle_registration_number",
+            "recorded_by_name",
+        )
         read_only_fields = ("recorded_by", "created_at")
