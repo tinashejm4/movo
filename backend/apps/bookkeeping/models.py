@@ -149,6 +149,33 @@ class IntracitySale(models.Model):
 
         super().save(*args, **kwargs)
 
+class Asset(models.Model):
+    ASSET_TYPES = [
+        ('vehicle', 'Vehicle'),
+        ('equipment', 'Equipment'),
+        ('furniture', 'Furniture'),
+        ('other', 'Other')
+    ]
+
+    asset_type = models.CharField(max_length=50, choices=ASSET_TYPES)
+    name = models.CharField(max_length=100)
+    supplier = models.CharField(max_length=100, blank=True, null=True)
+    unique_identifier = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name}"
+
+class AssetImage(models.Model):
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='asset_images/')
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Image for Asset {self.asset}"
+
+
 class ExpenseAccount(models.Model):
     name = models.CharField(max_length = 50)
     description = models.TextField(blank = True, null = True)
@@ -203,85 +230,29 @@ class Expense(models.Model):
         super().save(*args, **kwargs)
 
 class Receipt(models.Model):
-    expense = models.OneToOneField(Expense, on_delete = models.CASCADE)
+    expense = models.OneToOneField(Expense, on_delete = models.SET_NULL, null = True)
     image = models.ImageField(upload_to = 'receipts/')
     added_at = models.DateField(auto_now_add = True)
 
     def __str__(self):
         return f"Receipt for Expense {self.expense}"
 
-
-class Asset(models.Model):
-    ASSET_TYPES = [
-        ('vehicle', 'Vehicle'),
-        ('equipment', 'Equipment'),
-        ('furniture', 'Furniture'),
-        ('other', 'Other')
-    ]
-
-    asset_type = models.CharField(max_length=50, choices=ASSET_TYPES)
-    name = models.CharField(max_length=100)
-    unique_identifier = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True, null=True)
+class GeneralExpense(models.Model):
+    expense = models.OneToOneField(Expense, on_delete=models.CASCADE)
+    added_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     added_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.name}"
+        return f"General Expense {self.expense}"
 
-#for assets
 class CapitalExpense(models.Model):
-    ledger_entry = models.OneToOneField(
-        LedgerEntry, on_delete=models.CASCADE, null=True, blank=True
-    )
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='capital_expenses')
-    account = models.ForeignKey(Account, on_delete=models.CASCADE)
-    amount = models.FloatField(default=0)
-    expense_type = models.ForeignKey(ExpenseAccount, on_delete = models.CASCADE)
-    supplier = models.CharField(max_length = 100, blank = True, null = True)
-    description = models.TextField(blank = True, null = True)
-    actual_date = models.DateTimeField(auto_now_add=True)
-    is_reversed = models.BooleanField(default=False)
-    reversed_at = models.DateTimeField(blank=True, null=True)
-    reversed_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="reversed_capital_expenses",
-    )
-    reason_for_reversal = models.TextField(blank=True, null=True)
-    added_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True)
-    added_at = models.DateTimeField(auto_now_add = True)
+    expense = models.OneToOneField(Expense, on_delete=models.SET_NULL, null = True)
+    added_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    added_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"${self.amount:0.2f} for Account {self.account}"
-
-    @transaction.atomic
-    def save(self, *args, **kwargs):
-        if self.ledger_entry_id:
-            self.account = self.ledger_entry.account
-            self.amount = abs(float(self.ledger_entry.amount))
-        else:
-            if not self.account_id:
-                raise ValueError("An account is required to record an expense.")
-            self.ledger_entry = LedgerEntry.objects.create(
-                account=self.account,
-                entry_type=LedgerEntry.DEBIT,
-                amount=float(str(self.amount)),
-                running_balance=float("0.00"),
-                transaction_type="expense",
-                reference=uuid.uuid4(),
-            )
-            self.amount = abs(float(self.ledger_entry.amount))
-        super().save(*args, **kwargs)
-
-
-class CapitalExpenseReceipt(models.Model):
-    expense = models.OneToOneField(CapitalExpense, on_delete = models.CASCADE)
-    image = models.ImageField(upload_to = 'receipts/')
-    added_at = models.DateField(auto_now_add = True)
-
-    def __str__(self):
-        return f"Receipt for Capital Expense {self.expense}"
+        return f"Capital Expense {self.expense if self.expense else 'N/A'}"
 
 class FundsTransfer(models.Model):
     from_account_ledger_entry = models.OneToOneField(

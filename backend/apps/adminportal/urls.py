@@ -43,6 +43,7 @@ from apps.adminportal.views.accounts_views import (
 )
 
 from .views.delivery_order_views import DeliveryPageView
+from .views.asset_views import AssetImageContentView, AssetImagesView, AssetsView
 from .views.driver_shift_views import WeeklyShiftsView, WeeklyShiftDetailView, DriverExceptionsView, DriverExceptionDetailView, DriverShiftReminderView, DriverShiftExceptionOverviewView
 from .views.handover_review_views import HandoverReviewListView, HandoverReviewResolveView
 from .views.refund_review_views import RefundReviewListView, RefundReviewResolveView
@@ -81,6 +82,9 @@ urlpatterns = [
     path("customers/", CustomersListView.as_view(), name="customers_list_view"),
     path("customers/<int:pk>/", CustomersDetailView.as_view(), name="customers_detail_view"),
     path("accounts/", AccountsListView.as_view(), name="accounts_list_view"),
+    path("assets/", AssetsView.as_view(), name="admin_assets"),
+    path("assets/<int:asset_id>/images/", AssetImagesView.as_view(), name="admin_asset_images"),
+    path("assets/<int:asset_id>/images/<int:image_id>/", AssetImageContentView.as_view(), name="admin_asset_image"),
     path("accounts/expense-classes/", ExpenseClassView.as_view(), name="expense_class_view"),
     path("accounts/create-expense/", CreateExpenseView.as_view(), name="create_expense_view"),
     path("accounts/create-charge/", CreateChargeView.as_view(), name="create_charge_view"),

@@ -16,7 +16,7 @@ from rest_framework.test import APITestCase
 from PIL import Image
 
 from apps.intracity.models import Package, PackageStatus
-from apps.bookkeeping.models import Account, Expense, ExpenseAccount, LedgerEntry, Receipt
+from apps.bookkeeping.models import Account, Asset, CapitalExpense, Expense, GeneralExpense, ExpenseAccount, LedgerEntry, Receipt
 from apps.users.models import Branch, Biker, City, Customer, Staff
 from apps.transporters.models import BikerDailySession, DriverShiftException
 
@@ -229,6 +229,7 @@ class AccountExpenseViewsTests(APITestCase):
 		)
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		expense = Expense.objects.get(pk=response.data["expense_id"])
+		self.assertTrue(GeneralExpense.objects.filter(expense=expense, added_by=self.user).exists())
 		self.assertEqual(expense.added_by, self.user)
 		self.assertEqual(expense.account, self.account)
 		self.assertEqual(expense.expense_type, self.expense_type)
@@ -267,10 +268,16 @@ class AccountExpenseViewsTests(APITestCase):
 	def test_lists_only_selected_account_with_inclusive_dates_and_receipt(self):
 		today = timezone.localdate()
 		expense = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=3, added_by=self.user)
+		GeneralExpense.objects.create(expense=expense, added_by=self.user)
 		Receipt.objects.create(expense=expense, image="receipts/test.png")
 		outside = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=4)
+		GeneralExpense.objects.create(expense=outside, added_by=self.user)
 		Expense.objects.filter(pk=outside.pk).update(actual_date=timezone.now() - timedelta(days=3))
-		Expense.objects.create(account=self.other_account, expense_type=self.expense_type, amount=5)
+		other = Expense.objects.create(account=self.other_account, expense_type=self.expense_type, amount=5)
+		GeneralExpense.objects.create(expense=other, added_by=self.user)
+		asset = Asset.objects.create(name="Laptop", asset_type="equipment", unique_identifier="asset-test")
+		capital = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=6)
+		CapitalExpense.objects.create(asset=asset, expense=capital, added_by=self.user)
 		url = reverse("list_expenses_view", kwargs={"account_id": self.account.id})
 
 		response = self.client.get(url, {"start_date": today.isoformat(), "end_date": today.isoformat()})
@@ -295,6 +302,28 @@ class AccountExpenseViewsTests(APITestCase):
 				self.assertEqual(self.client.get(url, params).status_code, status.HTTP_400_BAD_REQUEST)
 		missing = reverse("list_expenses_view", kwargs={"account_id": 999999})
 		self.assertEqual(self.client.get(missing).status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_reverses_general_and_capital_expenses_once(self):
+		general = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=3, added_by=self.user)
+		GeneralExpense.objects.create(expense=general, added_by=self.user)
+		asset = Asset.objects.create(name="Laptop", asset_type="equipment", unique_identifier="reversal-asset")
+		capital = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=5, added_by=self.user)
+		CapitalExpense.objects.create(asset=asset, expense=capital, added_by=self.user)
+		url = reverse("expense_reversal_view", kwargs={"account_id": self.account.id})
+		wrong_url = reverse("expense_reversal_view", kwargs={"account_id": self.other_account.id})
+		self.assertEqual(self.client.post(wrong_url, {"expense_id": general.id, "reason": "Mistake"}, format="json").status_code, status.HTTP_404_NOT_FOUND)
+		self.assertEqual(self.client.post(url, {"expense_id": general.id, "reason": " "}, format="json").status_code, status.HTTP_400_BAD_REQUEST)
+		for expense in (general, capital):
+			response = self.client.post(url, {"expense_id": expense.id, "reason": "Mistake"}, format="json")
+			self.assertEqual(response.status_code, status.HTTP_200_OK)
+			expense.refresh_from_db()
+			self.assertTrue(expense.is_reversed)
+			self.assertEqual(expense.reversed_by, self.user)
+			self.assertEqual(expense.reason_for_reversal, "Mistake")
+			credit = LedgerEntry.objects.get(reference=expense.ledger_entry.reference, entry_type=LedgerEntry.CREDIT)
+			self.assertEqual(credit.amount, abs(expense.ledger_entry.amount))
+			self.assertEqual(self.client.post(url, {"expense_id": expense.id, "reason": "Again"}, format="json").status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(Decimal(str(self.account.get_balance())), Decimal("0.0"))
 
 	def test_receipt_upload_and_authenticated_image_view(self):
 		expense = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=3)
@@ -338,6 +367,7 @@ class AccountExpenseViewsTests(APITestCase):
 		response = self.client.post(url, payload, format="json")
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 		self.assertEqual(response.data["imported"], 2)
+		self.assertEqual(GeneralExpense.objects.filter(expense__import_id__in=["external-1", "external-2"]).count(), 2)
 		self.assertEqual(ExpenseAccount.objects.filter(name__iexact="supplies").count(), 1)
 		self.assertTrue(ExpenseAccount.objects.filter(name="New Type").exists())
 		entries = list(LedgerEntry.objects.filter(account=self.account).order_by("actual_date", "pk"))

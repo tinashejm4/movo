@@ -34,6 +34,9 @@ class Vehicle(models.Model):
 
     class Meta:
         ordering = ["registration_number"]
+        constraints = [
+            models.UniqueConstraint(fields=["asset"], name="vehicles_unique_asset"),
+        ]
 
     def __str__(self):
         return f"{self.registration_number} - {self.make} {self.model}"

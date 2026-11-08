@@ -7,7 +7,9 @@ from apps.users.permissions import IsStaff
 from datetime import datetime, time
 from decimal import Decimal, InvalidOperation
 from apps.users.models import Biker, Contact, NextOfKin, ProfileImage, Identification, Licence, Branch
-from apps.bookkeeping.models import Account, ExpenseAccount, IntracitySale, Expense, Charge, FundsTransfer, LedgerEntry, Receipt
+from apps.bookkeeping.models import (Account, ExpenseAccount, IntracitySale, 
+                                     Expense, GeneralExpense, Charge, FundsTransfer, LedgerEntry, Receipt, 
+                                     Asset, AssetImage)
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.http import FileResponse
@@ -128,6 +130,7 @@ class CreateExpenseView(APIView):
                 supplier=supplier,
                 added_by=request.user
             )
+            GeneralExpense.objects.create(expense=expense, added_by=request.user)
             if image:
                 Receipt.objects.create(expense=expense, image=image)
 
@@ -206,6 +209,7 @@ class BulkExpensesView(APIView):
                         account=account, expense_type=expense_type, amount=amount,
                         supplier=supplier, description=description, added_by=request.user, import_id=import_id,
                     )
+                    GeneralExpense.objects.create(expense=expense, added_by=request.user)
                     actual_date = timezone.make_aware(datetime.combine(day, time.min), timezone.get_current_timezone())
                     Expense.objects.filter(pk=expense.pk).update(actual_date=actual_date)
                     LedgerEntry.objects.filter(pk=expense.ledger_entry_id).update(actual_date=actual_date)
@@ -235,7 +239,7 @@ class ListExpensesView(APIView):
             if start_date > end_date:
                 return Response({"error": "Start date must not be after end date."}, status=status.HTTP_400_BAD_REQUEST)
         account = get_object_or_404(Account, id=account_id)
-        expenses = Expense.objects.filter(account=account).select_related(
+        expenses = Expense.objects.filter(account=account, generalexpense__isnull=False).select_related(
             "account", "expense_type", "added_by", "receipt"
         ).order_by("-actual_date", "-id")
         if start_date and end_date:
@@ -312,12 +316,9 @@ class CreateFundsTransferView(APIView):
 
 class ReceiptImageView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
-    def post(self, request):
+    def post(self, request, account_id):
         expense_id = request.data.get("expense_id")
-        try:
-            expense = Expense.objects.get(id=expense_id)
-        except Expense.DoesNotExist:
-            return Response({"error": "Expense not found"}, status=status.HTTP_404_NOT_FOUND)
+        expense = get_object_or_404(Expense, id=expense_id, account_id=account_id)
 
         image = Receipt.objects.get(expense=expense).image if Receipt.objects.filter(expense=expense).exists() else None
         if not image:
@@ -386,20 +387,35 @@ class ExpenseReceiptView(APIView):
 
 class ExpenseReversalView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
-    def post(self, request):
+    def post(self, request, account_id):
         expense_id = request.data.get("expense_id")
         reason = request.data.get("reason", "")
-
-        try:
-            expense = Expense.objects.get(id=expense_id)
-        except Expense.DoesNotExist:
-            return Response({"error": "Expense not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        user = request.user
-        if not reason:
+        if not isinstance(reason, str) or not reason.strip():
             return Response({"error": "Reason for reversal is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        expense.reverse(user, reason)
+        with transaction.atomic():
+            expense = get_object_or_404(
+                Expense.objects.select_for_update(), id=expense_id, account_id=account_id
+            )
+            if expense.is_reversed:
+                return Response({"error": "Expense has already been reversed."}, status=status.HTTP_409_CONFLICT)
+            if not expense.ledger_entry_id:
+                return Response({"error": "Expense has no ledger entry and cannot be reversed."}, status=status.HTTP_409_CONFLICT)
+            entry = expense.ledger_entry
+            if entry.account_id != expense.account_id or entry.entry_type != LedgerEntry.DEBIT or entry.amount >= 0:
+                return Response({"error": "Expense has an invalid ledger entry and cannot be reversed."}, status=status.HTTP_409_CONFLICT)
+            LedgerEntry.objects.create(
+                account=expense.account,
+                entry_type=LedgerEntry.CREDIT,
+                amount=abs(entry.amount),
+                running_balance=Decimal("0.00"),
+                transaction_type="expense",
+                reference=entry.reference,
+            )
+            expense.is_reversed = True
+            expense.reversed_at = timezone.now()
+            expense.reversed_by = request.user
+            expense.reason_for_reversal = reason.strip()
+            expense.save(update_fields=["is_reversed", "reversed_at", "reversed_by", "reason_for_reversal"])
         return Response({"success": "Expense reversed successfully"}, status=status.HTTP_200_OK)
 
 class ChargeReversalView(APIView):
