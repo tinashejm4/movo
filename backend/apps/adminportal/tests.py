@@ -1,15 +1,22 @@
 from django.test import TestCase
 
 from datetime import timedelta
+from decimal import Decimal
+from io import BytesIO
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
+from PIL import Image
 
 from apps.intracity.models import Package, PackageStatus
+from apps.bookkeeping.models import Account, Expense, ExpenseAccount, LedgerEntry, Receipt
 from apps.users.models import Branch, Biker, City, Customer, Staff
 from apps.transporters.models import BikerDailySession, DriverShiftException
 
@@ -196,3 +203,170 @@ class DriverShiftExceptionOverviewTests(APITestCase):
 		self.assertEqual(response.data[0]["biker_user_id"], self.first_biker.user_id)
 		self.assertEqual(response.data[0]["biker_name"], "driver-one")
 		self.assertEqual(response.data[1]["biker_name"], "Taylor Driver")
+
+
+class AccountExpenseViewsTests(APITestCase):
+	def setUp(self):
+		self.user = User.objects.create_user(username="expense-staff")
+		branch = Branch.objects.create(name="Expense Branch", address="Main street")
+		Staff.objects.create(user=self.user, branch=branch, position="Manager")
+		self.account = Account.objects.create(name="Expense account", currency="USD")
+		self.other_account = Account.objects.create(name="Other account", currency="USD")
+		self.expense_type = ExpenseAccount.objects.create(name="Supplies")
+		self.client.force_authenticate(user=self.user)
+
+	def test_creates_expense_for_user_and_records_ledger_entry(self):
+		response = self.client.post(
+			reverse("create_expense_view"),
+			{
+				"account_id": self.account.id,
+				"expense_type_id": self.expense_type.id,
+				"amount": "12.50",
+				"supplier": "Supplier",
+				"description": "Pens",
+			},
+			format="multipart",
+		)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		expense = Expense.objects.get(pk=response.data["expense_id"])
+		self.assertEqual(expense.added_by, self.user)
+		self.assertEqual(expense.account, self.account)
+		self.assertEqual(expense.expense_type, self.expense_type)
+		self.assertEqual(expense.ledger_entry.transaction_type, "expense")
+		self.assertEqual(str(expense.ledger_entry.amount), "-12.50")
+
+	def test_rejects_non_positive_and_invalid_amounts(self):
+		for amount in ("0", "-1", "NaN", "abc"):
+			with self.subTest(amount=amount):
+				response = self.client.post(
+					reverse("create_expense_view"),
+					{"account_id": self.account.id, "expense_type_id": self.expense_type.id, "amount": amount},
+					format="multipart",
+				)
+				self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertFalse(Expense.objects.exists())
+
+	def test_creates_expense_with_receipt(self):
+		with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+			response = self.client.post(
+				reverse("create_expense_view"),
+				{
+					"account_id": self.account.id,
+					"expense_type_id": self.expense_type.id,
+					"amount": "5.00",
+					"image": SimpleUploadedFile("receipt.png", b"receipt image", content_type="image/png"),
+				},
+				format="multipart",
+			)
+			self.assertEqual(response.status_code, status.HTTP_200_OK)
+			expense = Expense.objects.get(pk=response.data["expense_id"])
+			self.assertTrue(Receipt.objects.filter(expense=expense).exists())
+			list_response = self.client.get(reverse("list_expenses_view", kwargs={"account_id": self.account.id}))
+			self.assertTrue(list_response.data["expenses"][0]["has_image"])
+
+	def test_lists_only_selected_account_with_inclusive_dates_and_receipt(self):
+		today = timezone.localdate()
+		expense = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=3, added_by=self.user)
+		Receipt.objects.create(expense=expense, image="receipts/test.png")
+		outside = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=4)
+		Expense.objects.filter(pk=outside.pk).update(actual_date=timezone.now() - timedelta(days=3))
+		Expense.objects.create(account=self.other_account, expense_type=self.expense_type, amount=5)
+		url = reverse("list_expenses_view", kwargs={"account_id": self.account.id})
+
+		response = self.client.get(url, {"start_date": today.isoformat(), "end_date": today.isoformat()})
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(len(response.data["expenses"]), 1)
+		self.assertEqual(response.data["expenses"][0]["id"], expense.id)
+		self.assertEqual(response.data["expenses"][0]["added_by"], self.user.username)
+		self.assertTrue(response.data["expenses"][0]["has_image"])
+
+		response = self.client.get(url)
+		self.assertEqual({item["id"] for item in response.data["expenses"]}, {expense.id, outside.id})
+		self.assertFalse(next(item for item in response.data["expenses"] if item["id"] == outside.id)["has_image"])
+
+	def test_rejects_invalid_date_ranges_and_missing_account(self):
+		url = reverse("list_expenses_view", kwargs={"account_id": self.account.id})
+		for params in (
+			{"start_date": "2026-01-01"},
+			{"start_date": "invalid", "end_date": "2026-01-01"},
+			{"start_date": "2026-01-02", "end_date": "2026-01-01"},
+		):
+			with self.subTest(params=params):
+				self.assertEqual(self.client.get(url, params).status_code, status.HTTP_400_BAD_REQUEST)
+		missing = reverse("list_expenses_view", kwargs={"account_id": 999999})
+		self.assertEqual(self.client.get(missing).status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_receipt_upload_and_authenticated_image_view(self):
+		expense = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=3)
+		url = reverse("expense_receipt_view", kwargs={"account_id": self.account.id, "expense_id": expense.id})
+		wrong_account_url = reverse("expense_receipt_view", kwargs={"account_id": self.other_account.id, "expense_id": expense.id})
+		image_data = BytesIO()
+		Image.new("RGB", (2, 2), "red").save(image_data, format="PNG")
+
+		def upload():
+			return SimpleUploadedFile("receipt.png", image_data.getvalue(), content_type="image/png")
+
+		with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+			self.assertEqual(self.client.get(url).status_code, status.HTTP_404_NOT_FOUND)
+			self.assertEqual(self.client.post(wrong_account_url, {"image": upload()}, format="multipart").status_code, status.HTTP_404_NOT_FOUND)
+			self.assertEqual(self.client.post(url, {}, format="multipart").status_code, status.HTTP_400_BAD_REQUEST)
+			bad_image = SimpleUploadedFile("bad.png", b"not an image", content_type="image/png")
+			self.assertEqual(self.client.post(url, {"image": bad_image}, format="multipart").status_code, status.HTTP_400_BAD_REQUEST)
+			response = self.client.post(url, {"image": upload()}, format="multipart")
+			self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+			self.assertEqual(self.client.post(url, {"image": upload()}, format="multipart").status_code, status.HTTP_409_CONFLICT)
+			self.assertEqual(self.client.get(wrong_account_url).status_code, status.HTTP_404_NOT_FOUND)
+			response = self.client.get(url)
+			self.assertEqual(response.status_code, status.HTTP_200_OK)
+			self.assertEqual(response["Content-Type"], "image/png")
+			self.assertEqual(b"".join(response.streaming_content), image_data.getvalue())
+			self.client.force_authenticate(user=None)
+			self.assertEqual(self.client.get(url).status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_bulk_import_posts_historical_expenses_and_recalculates_balances(self):
+		existing = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=10, added_by=self.user)
+		existing_time = timezone.now() - timedelta(days=1)
+		Expense.objects.filter(pk=existing.pk).update(actual_date=existing_time)
+		LedgerEntry.objects.filter(pk=existing.ledger_entry_id).update(actual_date=existing_time)
+		date = (timezone.localdate() - timedelta(days=3)).strftime("%d/%m/%Y")
+		url = reverse("bulk_expenses_view", kwargs={"account_id": self.account.id})
+		payload = [
+			{"id": "external-1", "Date": date, "type": "supplies", "Supplier": "Shop", "description": "Pens", "amount": "5.25"},
+			{"id": "external-2", "Date": date, "type": "New Type", "Supplier": "Shop", "amount": 2},
+		]
+
+		response = self.client.post(url, payload, format="json")
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		self.assertEqual(response.data["imported"], 2)
+		self.assertEqual(ExpenseAccount.objects.filter(name__iexact="supplies").count(), 1)
+		self.assertTrue(ExpenseAccount.objects.filter(name="New Type").exists())
+		entries = list(LedgerEntry.objects.filter(account=self.account).order_by("actual_date", "pk"))
+		self.assertEqual([entry.running_balance for entry in entries], [Decimal("-5.25"), Decimal("-7.25"), Decimal("-17.25")])
+		self.assertEqual(Decimal(str(self.account.get_balance())), Decimal("-17.25"))
+		list_url = reverse("list_expenses_view", kwargs={"account_id": self.account.id})
+		iso_date = (timezone.localdate() - timedelta(days=3)).isoformat()
+		result = self.client.get(list_url, {"start_date": iso_date, "end_date": iso_date})
+		self.assertEqual(len(result.data["expenses"]), 2)
+		self.assertEqual(self.client.post(url, payload, format="json").status_code, status.HTTP_409_CONFLICT)
+		other_url = reverse("bulk_expenses_view", kwargs={"account_id": self.other_account.id})
+		self.assertEqual(self.client.post(other_url, payload, format="json").status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(Expense.objects.filter(account=self.account).count(), 3)
+
+	def test_bulk_import_rejects_bad_rows_without_partial_writes(self):
+		url = reverse("bulk_expenses_view", kwargs={"account_id": self.account.id})
+		base = {"id": "one", "date": "29/5/2026", "type": "new class", "supplier": "Shop", "amount": "2.00"}
+		for invalid in (
+			{**base, "id": "two", "date": "invalid"},
+			{**base, "id": "two", "amount": "2.001"},
+			{**base, "id": "two", "amount": "-2"},
+			{**base, "id": "one"},
+			{**base, "id": ""},
+			{**base, "id": "two", "date": "01/01/9999"},
+		):
+			with self.subTest(invalid=invalid):
+				response = self.client.post(url, [base, invalid], format="json")
+				self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+				self.assertFalse(Expense.objects.exists())
+				self.assertFalse(ExpenseAccount.objects.filter(name="new class").exists())
+		self.client.force_authenticate(user=None)
+		self.assertEqual(self.client.post(url, [base], format="json").status_code, status.HTTP_401_UNAUTHORIZED)

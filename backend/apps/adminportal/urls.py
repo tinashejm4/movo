@@ -26,15 +26,18 @@ from apps.adminportal.views.customer_views import (
     CustomersMetricsView
 )
 
-from apps.adminportal.views.accounts import (
+from apps.adminportal.views.accounts_views import (
     AccountsListView,
     AccountTransactionsView,
     CreateFundsTransferView,
+    ListExpensesView,
     ReceiptImageView,
+    ExpenseReceiptView,
     ExpenseReversalView,
     ChargeReversalView,
     FundsTransferReversalView,
     CreateExpenseView,
+    BulkExpensesView,
     ExpenseClassView,
     CreateChargeView
 )
@@ -84,7 +87,10 @@ urlpatterns = [
     path("accounts/create-funds-transfer/", CreateFundsTransferView.as_view(), name="create_funds_transfer_view"),
     path("accounts/<int:account_id>/transactions/", AccountTransactionsView.as_view(), name="account_transactions_view"),
     path("accounts/<int:account_id>/receipt-image/", ReceiptImageView.as_view(), name="receipt_image_view"),
+    path("accounts/<int:account_id>/expenses/<int:expense_id>/receipt/", ExpenseReceiptView.as_view(), name="expense_receipt_view"),
     path("accounts/<int:account_id>/expense-reversal/", ExpenseReversalView.as_view(), name="expense_reversal_view"),
     path("accounts/<int:account_id>/charge-reversal/", ChargeReversalView.as_view(), name="charge_reversal_view"),
     path("accounts/<int:account_id>/funds-transfer-reversal/", FundsTransferReversalView.as_view(), name="funds_transfer_reversal_view"),
+    path("accounts/<int:account_id>/list-expenses/", ListExpensesView.as_view(), name="list_expenses_view"),
+    path("accounts/<int:account_id>/bulk-expenses/", BulkExpensesView.as_view(), name="bulk_expenses_view"),
 ]

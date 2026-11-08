@@ -50,10 +50,6 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
-
-print()
-print(ALLOWED_HOSTS)
-print("DEBUG:", DEBUG)
 # HOSTNAME is often set by the OS/container to the machine name, so always
 # allow local hosts during development.
 if DEBUG:

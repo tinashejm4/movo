@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
+from apps.bookkeeping.models import Asset
 from apps.users.models import Biker
 
 from .models import (
@@ -19,6 +20,12 @@ class VehicleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Vehicle
         fields = "__all__"
+        read_only_fields = ("asset",)
+
+    def validate_registration_number(self, value):
+        if self.instance is None and Asset.objects.filter(unique_identifier=value).exists():
+            raise serializers.ValidationError("An asset with this registration number already exists.")
+        return value
 
 
 class VehicleAssignmentSerializer(serializers.ModelSerializer):

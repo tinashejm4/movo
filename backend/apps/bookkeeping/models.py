@@ -165,6 +165,7 @@ class Expense(models.Model):
     amount = models.FloatField(default=0)
     expense_type = models.ForeignKey(ExpenseAccount, on_delete = models.CASCADE)
     supplier = models.CharField(max_length = 100, blank = True, null = True)
+    import_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     description = models.TextField(blank = True, null = True)
     actual_date = models.DateTimeField(auto_now_add=True)
     is_reversed = models.BooleanField(default=False)
@@ -426,8 +427,8 @@ class Charge(models.Model):
         return f"Charge of ${self.amount:0.2f} for {self.account}"
 
 class ExchangeRate(models.Model):
-    base_currency = models.CharField(max_length=3)
-    target_currency = models.CharField(max_length=3)
+    base_currency = models.CharField(max_length=3, default = "USD")
+    target_currency = models.CharField(max_length=3, default = "ZWL")
     rate = models.FloatField()
     added_at = models.DateTimeField(auto_now_add=True)
 
