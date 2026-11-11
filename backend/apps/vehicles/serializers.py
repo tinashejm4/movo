@@ -54,9 +54,17 @@ class VehicleAssignmentSerializer(serializers.ModelSerializer):
         mileage_km = attrs.get("start_mileage_km")
         if self.instance is None:
             has_mileage_record = attrs.get("start_mileage_record") is not None
-            if mileage_km is None and not has_mileage_record:
+            vehicle = attrs.get("vehicle")
+            has_previous_release = (
+                vehicle is not None
+                and VehicleAssignment.objects.filter(
+                    vehicle=vehicle,
+                    release_mileage_record__isnull=False,
+                ).exists()
+            )
+            if mileage_km is None and not has_mileage_record and not has_previous_release:
                 raise serializers.ValidationError({
-                    "start_mileage_km": "Provide a starting odometer reading or an existing mileage record."
+                    "start_mileage_km": "Provide a starting odometer reading or an existing mileage record when this vehicle has no previous release mileage."
                 })
             if mileage_km is not None and has_mileage_record:
                 raise serializers.ValidationError({
@@ -90,14 +98,26 @@ class VehicleAssignmentSerializer(serializers.ModelSerializer):
                 })
             validated_data["driver"] = driver
 
+            assignment_time = validated_data["assigned_at"]
+            mileage_recorded_by = validated_data.get("assigned_by")
+            if mileage_km is None and "start_mileage_record" not in validated_data:
+                previous_release = VehicleAssignment.objects.filter(
+                    vehicle=validated_data["vehicle"],
+                    release_mileage_record__isnull=False,
+                ).select_related("release_mileage_record", "released_by").order_by(
+                    "-released_at", "-pk"
+                ).first()
+                if previous_release is not None:
+                    mileage_km = previous_release.release_mileage_record.odometer_km
+                    mileage_recorded_by = previous_release.released_by
+
             if mileage_km is not None:
-                assignment_time = validated_data["assigned_at"]
                 mileage = MileageRecord.objects.create(
                     vehicle=validated_data["vehicle"],
                     odometer_km=mileage_km,
                     recorded_at=assignment_time,
                     source=MileageRecord.Source.ASSIGNMENT_START,
-                    recorded_by=validated_data.get("assigned_by"),
+                    recorded_by=mileage_recorded_by,
                 )
                 validated_data["start_mileage_record"] = mileage
 
@@ -123,6 +143,11 @@ class ReassignVehicleInputSerializer(serializers.Serializer):
     release_mileage_km = serializers.IntegerField(min_value=0)
     start_mileage_km = serializers.IntegerField(min_value=0)
     handover_notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class UnassignVehicleInputSerializer(serializers.Serializer):
+    released_at = serializers.DateTimeField()
+    release_mileage_km = serializers.IntegerField(min_value=0)
 
 
 class MileageRecordSerializer(serializers.ModelSerializer):
