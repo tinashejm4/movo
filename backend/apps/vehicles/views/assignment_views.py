@@ -1,20 +1,25 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.users.permissions import IsStaff
 from apps.users.models import Biker
 from ..models import MileageRecord, VehicleAssignment
-from ..serializers import ReassignVehicleInputSerializer, VehicleAssignmentSerializer
+from ..serializers import (
+    ReassignVehicleInputSerializer,
+    UnassignVehicleInputSerializer,
+    VehicleAssignmentSerializer,
+)
 
 
 class VehicleAssignmentViewSet(viewsets.ModelViewSet):
     serializer_class = VehicleAssignmentSerializer
-    permission_classes = [IsAuthenticated, IsStaff]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return VehicleAssignment.objects.select_related(
@@ -36,6 +41,18 @@ class VehicleAssignmentViewSet(viewsets.ModelViewSet):
         if assignment is None:
             raise NotFound("No active assignment exists for this vehicle.")
         return Response(self.get_serializer(assignment).data)
+
+    @action(detail=False, methods=["get"], url_path="my-assignment")
+    def my_assignment(self, request):
+        """Return whether the requesting user has an active vehicle assignment."""
+        assignment = self.get_queryset().filter(
+            driver__user=request.user,
+            released_at__isnull=True,
+        ).first()
+        return Response({
+            "assigned": assignment is not None,
+            "assignment_id": assignment.pk if assignment is not None else None,
+        })
 
     @action(detail=True, methods=["post"], url_path="reassign")
     def reassign(self, request, pk=None):
@@ -116,8 +133,58 @@ class VehicleAssignmentViewSet(viewsets.ModelViewSet):
             "assignment": self.get_serializer(next_assignment).data,
         }, status=200)
 
+    @action(detail=True, methods=["post"], url_path="unassign")
+    def unassign(self, request, pk=None):
+        input_serializer = UnassignVehicleInputSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        data = input_serializer.validated_data
+
+        with transaction.atomic():
+            try:
+                assignment = VehicleAssignment.objects.select_for_update().get(pk=pk)
+            except VehicleAssignment.DoesNotExist as error:
+                raise NotFound("Assignment not found.") from error
+            if assignment.released_at is not None:
+                raise ValidationError({"assignment": "Only an active assignment can be released."})
+
+            release_record = MileageRecord.objects.create(
+                vehicle=assignment.vehicle,
+                odometer_km=data["release_mileage_km"],
+                recorded_at=data["released_at"],
+                source=MileageRecord.Source.ASSIGNMENT_RELEASE,
+                recorded_by=request.user,
+            )
+            assignment.released_at = data["released_at"]
+            assignment.release_mileage_record = release_record
+            assignment.released_by = request.user
+            try:
+                assignment.clean()
+            except DjangoValidationError as error:
+                detail = error.message_dict if hasattr(error, "message_dict") else error.messages
+                raise ValidationError(detail) from error
+            assignment.save(update_fields=("released_at", "release_mileage_record", "released_by"))
+
+        return Response(self.get_serializer(assignment).data, status=200)
+
     def perform_create(self, serializer):
         serializer.save(assigned_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        is_staff = IsStaff().has_permission(request, self)
+        driver = Biker.objects.filter(user=request.user).first()
+        if not is_staff and driver is None:
+            raise PermissionDenied("Only staff or a driver can create a vehicle assignment.")
+
+        if driver is not None and not is_staff:
+            data = request.data.copy()
+            data["driver"] = driver.pk
+            data["assigned_at"] = timezone.now()
+            data["released_at"] = None
+            data["release_mileage_record"] = None
+            data["released_by"] = None
+            request._full_data = data
+
+        return super().create(request, *args, **kwargs)
 
     def perform_update(self, serializer):
         is_being_released = (
