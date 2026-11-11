@@ -1,7 +1,8 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
+from apps.bookkeeping.models import Asset
 from apps.users.models import Biker
 
 from .models import (
@@ -16,9 +17,34 @@ from .models import (
 
 
 class VehicleSerializer(serializers.ModelSerializer):
+    asset = serializers.PrimaryKeyRelatedField(queryset=Asset.objects.filter(asset_type="vehicle"), required=False)
+
     class Meta:
         model = Vehicle
         fields = "__all__"
+
+    def validate(self, attrs):
+        if self.instance is None and "asset" not in attrs:
+            raise serializers.ValidationError({"asset": "Select an existing vehicle asset."})
+        if self.instance is not None and "asset" in attrs and attrs["asset"].pk != self.instance.asset_id:
+            raise serializers.ValidationError({"asset": "The linked asset cannot be changed here."})
+        return attrs
+
+    def create(self, validated_data):
+        asset = validated_data["asset"]
+        try:
+            with transaction.atomic():
+                asset = Asset.objects.select_for_update().get(pk=asset.pk, asset_type="vehicle")
+                if Vehicle.objects.filter(asset=asset).exists():
+                    raise serializers.ValidationError({"asset": "This asset is already linked to a vehicle."})
+                validated_data["asset"] = asset
+                return super().create(validated_data)
+        except Asset.DoesNotExist:
+            raise serializers.ValidationError({"asset": "The selected vehicle asset is no longer available."})
+        except IntegrityError:
+            if Vehicle.objects.filter(asset_id=asset.pk).exists():
+                raise serializers.ValidationError({"asset": "This asset is already linked to a vehicle."})
+            raise
 
 
 class VehicleAssignmentSerializer(serializers.ModelSerializer):

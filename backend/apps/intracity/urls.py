@@ -15,6 +15,7 @@ package_price = PackageViewSet.as_view({"post": "package_price"})
 sender_receiver_login = PackageViewSet.as_view({"post": "sender_receiver_login"})
 current_packages = PackageViewSet.as_view({"get": "current_packages"})
 renew_package = PackageViewSet.as_view({"post": "renew_package"})
+cancel_all_packages = PackageViewSet.as_view({"post": "cancel_all_packages"})
 
 assign_pending_packages = DeliveryViewSet.as_view({"post": "assign_pending_packages"})
 pickup_verify = DeliveryViewSet.as_view({"post": "pickup_verify"})
@@ -67,6 +68,11 @@ urlpatterns = [
         name="intracity_assign_pending_packages",
     ),
     path("cancel-order/", cancel_order, name="intracity_cancel_order"),
+    path(
+        "cancel-all-packages/",
+        cancel_all_packages,
+        name="intracity_cancel_all_packages",
+    ),
     path("search-suburbs/", search_suburb, name="intracity_search_suburb"),
     path(
         "ecocash-payment/",

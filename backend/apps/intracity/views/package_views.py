@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.utils import timezone
 from django.db import transaction
 import hashlib
@@ -822,7 +823,19 @@ class PackageViewSet(ViewSet):
         if city_id:
             suburbs_qs = suburbs_qs.filter(city__id=city_id)
 
-        suburbs = list(suburbs_qs.order_by("name").values("id", "name").distinct())
+        suburbs = []
+        for suburb in suburbs_qs.order_by("name").distinct():
+            name = suburb.name
+            if normalized_query not in name.lower():
+                matched_alias = (
+                    suburb.aliases.filter(alias__icontains=query)
+                    .order_by("alias")
+                    .values_list("alias", flat=True)
+                    .first()
+                )
+                if matched_alias:
+                    name = f"{matched_alias} - {name}"
+            suburbs.append({"id": suburb.id, "name": name})
 
         if len(query) > 2:
             SuburbSearchLog.objects.create(
@@ -1056,3 +1069,36 @@ class PackageViewSet(ViewSet):
                 stage=stage,
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    # test only
+    # Cancels all pending and in transit and expired packages for all users - for testing purposes only
+    @transaction.atomic
+    def cancel_all_packages(self, request):
+
+        latest_status = (
+            PackageStatus.objects.filter(package=OuterRef("pk"))
+            .order_by("-updated_at", "-pk")
+            .values("status")[:1]
+        )
+        packages = list(
+            Package.objects.select_for_update(of=("self",))
+            .annotate(current_status=Subquery(latest_status))
+            .filter(current_status__in=["Pending", "In Transit", "Expired"])
+        )
+
+        for package in packages:
+            PackageStatus.objects.create(
+                package=package,
+                status="Cancelled",
+                comments="Cancelled by test endpoint",
+            )
+            notify_current_packages_changed(package=package, reason="cancelled")
+
+        return Response(
+            {
+                "message": "All pending, in transit and expired packages cancelled",
+                "cancelled_count": len(packages),
+            },
+            status=status.HTTP_200_OK,
+        )
+
