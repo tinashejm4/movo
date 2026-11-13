@@ -3,9 +3,11 @@ from rest_framework import viewsets
 from rest_framework.filters import SearchFilter
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.db.models import Prefetch
 from apps.bookkeeping.models import Asset
 from ..models import (
     Vehicle,
+    VehicleAssignment,
 )
 from ..serializers import (
     VehicleSerializer,
@@ -19,7 +21,16 @@ class VehicleViewSet(viewsets.ModelViewSet):
     search_fields = ["registration_number"]
 
     def get_queryset(self):
-        return Vehicle.objects.all()
+        active_assignments = VehicleAssignment.objects.filter(
+            released_at__isnull=True,
+        ).only("vehicle_id", "driver_id")
+        return Vehicle.objects.prefetch_related(
+            Prefetch(
+                "assignments",
+                queryset=active_assignments,
+                to_attr="active_assignments",
+            )
+        )
 
     def perform_create(self, serializer):
         serializer.save()

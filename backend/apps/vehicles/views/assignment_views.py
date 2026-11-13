@@ -11,6 +11,7 @@ from apps.users.permissions import IsStaff
 from apps.users.models import Biker
 from ..models import MileageRecord, VehicleAssignment
 from ..serializers import (
+    FinishVehicleAssignmentInputSerializer,
     ReassignVehicleInputSerializer,
     UnassignVehicleInputSerializer,
     VehicleAssignmentSerializer,
@@ -45,6 +46,11 @@ class VehicleAssignmentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="my-assignment")
     def my_assignment(self, request):
         """Return whether the requesting user has an active vehicle assignment."""
+        biker = Biker.objects.filter(user=request.user).first()
+        if biker is not None:
+            from apps.transporters.shift_service import reconcile_driver
+
+            reconcile_driver(biker)
         assignment = self.get_queryset().filter(
             driver__user=request.user,
             released_at__isnull=True,
@@ -52,7 +58,54 @@ class VehicleAssignmentViewSet(viewsets.ModelViewSet):
         return Response({
             "assigned": assignment is not None,
             "assignment_id": assignment.pk if assignment is not None else None,
+            "finish_mileage_required": bool(
+                assignment and assignment.finish_mileage_required
+            ),
         })
+
+    @action(detail=True, methods=["post"], url_path="finish")
+    def finish(self, request, pk=None):
+        input_serializer = FinishVehicleAssignmentInputSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            try:
+                assignment = VehicleAssignment.objects.select_for_update().select_related(
+                    "vehicle", "start_mileage_record"
+                ).get(pk=pk)
+            except VehicleAssignment.DoesNotExist as error:
+                raise NotFound("Assignment not found.") from error
+            biker = Biker.objects.filter(user=request.user).first()
+            if biker is None or assignment.driver_id != biker.pk:
+                raise PermissionDenied("You can only submit mileage for your own bike assignment.")
+            if assignment.released_at is not None:
+                raise ValidationError({"assignment": "This assignment has already been released."})
+            if not assignment.finish_mileage_required:
+                raise ValidationError({"assignment": "Finish mileage can only be submitted after your shift ends."})
+
+            released_at = timezone.now()
+            release_record = MileageRecord.objects.create(
+                vehicle=assignment.vehicle,
+                odometer_km=input_serializer.validated_data["release_mileage_km"],
+                recorded_at=released_at,
+                source=MileageRecord.Source.ASSIGNMENT_RELEASE,
+                recorded_by=request.user,
+            )
+            assignment.released_at = released_at
+            assignment.release_mileage_record = release_record
+            assignment.released_by = request.user
+            assignment.finish_mileage_required = False
+            try:
+                assignment.clean()
+            except DjangoValidationError as error:
+                detail = error.message_dict if hasattr(error, "message_dict") else error.messages
+                raise ValidationError(detail) from error
+            assignment.save(update_fields=(
+                "released_at",
+                "release_mileage_record",
+                "released_by",
+                "finish_mileage_required",
+            ))
+        return Response(self.get_serializer(assignment).data, status=200)
 
     @action(detail=True, methods=["post"], url_path="reassign")
     def reassign(self, request, pk=None):
@@ -84,7 +137,8 @@ class VehicleAssignmentViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"driver": "This driver already has an active vehicle assignment."})
 
             handover_at = data["handover_at"]
-            if data["start_mileage_km"] < data["release_mileage_km"]:
+            start_mileage_km = data.get("start_mileage_km", data["release_mileage_km"])
+            if start_mileage_km < data["release_mileage_km"]:
                 raise ValidationError({
                     "start_mileage_km": "Starting mileage cannot be lower than the outgoing driver's return mileage."
                 })
@@ -108,7 +162,7 @@ class VehicleAssignmentViewSet(viewsets.ModelViewSet):
 
             start_record = MileageRecord.objects.create(
                 vehicle=current.vehicle,
-                odometer_km=data["start_mileage_km"],
+                odometer_km=start_mileage_km,
                 recorded_at=handover_at,
                 source=MileageRecord.Source.ASSIGNMENT_START,
                 recorded_by=request.user,
@@ -135,6 +189,8 @@ class VehicleAssignmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="unassign")
     def unassign(self, request, pk=None):
+        if not IsStaff().has_permission(request, self):
+            raise PermissionDenied("Only fleet staff can release an assignment manually.")
         input_serializer = UnassignVehicleInputSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data

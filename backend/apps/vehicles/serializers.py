@@ -18,6 +18,26 @@ from .models import (
 
 class VehicleSerializer(serializers.ModelSerializer):
     asset = serializers.PrimaryKeyRelatedField(queryset=Asset.objects.filter(asset_type="vehicle"), required=False)
+    available = serializers.SerializerMethodField()
+    assigned_to = serializers.SerializerMethodField()
+
+    def _active_assignment(self, obj):
+        assignment = getattr(obj, "_active_assignment_for_response", serializers.empty)
+        if assignment is serializers.empty:
+            prefetched = getattr(obj, "active_assignments", None)
+            if prefetched is None:
+                assignment = obj.assignments.filter(released_at__isnull=True).only("driver_id").first()
+            else:
+                assignment = prefetched[0] if prefetched else None
+            obj._active_assignment_for_response = assignment
+        return obj._active_assignment_for_response
+
+    def get_available(self, obj) -> bool:
+        return self._active_assignment(obj) is None
+
+    def get_assigned_to(self, obj) -> int | None:
+        assignment = self._active_assignment(obj)
+        return assignment.driver_id if assignment is not None else None
 
     class Meta:
         model = Vehicle
@@ -64,7 +84,7 @@ class VehicleAssignmentSerializer(serializers.ModelSerializer):
             )
             if mileage_km is None and not has_mileage_record and not has_previous_release:
                 raise serializers.ValidationError({
-                    "start_mileage_km": "Provide a starting odometer reading or an existing mileage record when this vehicle has no previous release mileage."
+                    "start_mileage_km": "This vehicle has no previous release mileage. Ask fleet staff to record its initial odometer reading."
                 })
             if mileage_km is not None and has_mileage_record:
                 raise serializers.ValidationError({
@@ -133,7 +153,12 @@ class VehicleAssignmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = VehicleAssignment
         fields = "__all__"
-        read_only_fields = ("assigned_by", "released_by", "created_at")
+        read_only_fields = (
+            "assigned_by",
+            "released_by",
+            "created_at",
+            "finish_mileage_required",
+        )
         extra_kwargs = {"start_mileage_record": {"required": False}}
 
 
@@ -141,12 +166,16 @@ class ReassignVehicleInputSerializer(serializers.Serializer):
     driver = serializers.PrimaryKeyRelatedField(queryset=Biker.objects.all())
     handover_at = serializers.DateTimeField()
     release_mileage_km = serializers.IntegerField(min_value=0)
-    start_mileage_km = serializers.IntegerField(min_value=0)
+    start_mileage_km = serializers.IntegerField(min_value=0, required=False)
     handover_notes = serializers.CharField(required=False, allow_blank=True)
 
 
 class UnassignVehicleInputSerializer(serializers.Serializer):
     released_at = serializers.DateTimeField()
+    release_mileage_km = serializers.IntegerField(min_value=0)
+
+
+class FinishVehicleAssignmentInputSerializer(serializers.Serializer):
     release_mileage_km = serializers.IntegerField(min_value=0)
 
 

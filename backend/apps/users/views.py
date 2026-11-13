@@ -705,6 +705,15 @@ class DriverProfileView(APIView):
 
     @extend_schema(
         tags=["Biker Stuff"],
+        parameters=[
+            OpenApiParameter(
+                name="driver_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Biker profile ID to view; defaults to the authenticated driver's profile.",
+            )
+        ],
         responses={
             200: DriverProfileResponseSerializer,
             401: OpenApiResponse(
@@ -718,12 +727,25 @@ class DriverProfileView(APIView):
         },
     )
     def get(self, request):
-        user = request.user
-        biker = Biker.objects.filter(user=user).first()
-        if not biker:
+        driver_id = request.query_params.get("driver_id")
+        if driver_id is not None:
+            try:
+                driver_id = int(driver_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "driver_id must be a valid Biker profile ID"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            biker = Biker.objects.select_related("user").filter(pk=driver_id).first()
+        else:
+            biker = Biker.objects.select_related("user").filter(user=request.user).first()
+
+        if biker is None:
             return Response(
                 {"error": "Biker Profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
+
+        user = biker.user
 
         contact = get_object_or_404(Contact, user=user)
         profile_image = get_object_or_404(ProfileImage, user=user)
