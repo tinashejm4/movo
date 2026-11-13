@@ -18,6 +18,26 @@ from .models import (
 
 class VehicleSerializer(serializers.ModelSerializer):
     asset = serializers.PrimaryKeyRelatedField(queryset=Asset.objects.filter(asset_type="vehicle"), required=False)
+    available = serializers.SerializerMethodField()
+    assigned_to = serializers.SerializerMethodField()
+
+    def _active_assignment(self, obj):
+        assignment = getattr(obj, "_active_assignment_for_response", serializers.empty)
+        if assignment is serializers.empty:
+            prefetched = getattr(obj, "active_assignments", None)
+            if prefetched is None:
+                assignment = obj.assignments.filter(released_at__isnull=True).only("driver_id").first()
+            else:
+                assignment = prefetched[0] if prefetched else None
+            obj._active_assignment_for_response = assignment
+        return obj._active_assignment_for_response
+
+    def get_available(self, obj) -> bool:
+        return self._active_assignment(obj) is None
+
+    def get_assigned_to(self, obj) -> int | None:
+        assignment = self._active_assignment(obj)
+        return assignment.driver_id if assignment is not None else None
 
     class Meta:
         model = Vehicle

@@ -20,7 +20,7 @@ class Vehicle(models.Model):
         MAINTENANCE = "maintenance", "In maintenance"
         RETIRED = "retired", "Retired"
 
-    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="fleet_vehicles")
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="fleet_vehicles", null=True, blank=True)
     vehicle_type = models.CharField(max_length=20, choices=Type.choices)
     registration_number = models.CharField(max_length=20, unique=True)
     make = models.CharField(max_length=100)

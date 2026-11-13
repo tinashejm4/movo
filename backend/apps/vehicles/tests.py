@@ -138,6 +138,28 @@ class VehicleAssignmentByVehicleTests(TestCase):
             recorded_by=self.staff_user,
         )
 
+    def test_vehicle_list_reports_availability_and_assigned_biker_id(self):
+        self.client.force_authenticate(self.staff_user)
+
+        response = self.client.get("/api/vehicles/vehicles/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data[0]["available"])
+        self.assertIsNone(response.data[0]["assigned_to"])
+
+        now = timezone.now()
+        start = self.make_mileage(MileageRecord.Source.ASSIGNMENT_START, 10, now)
+        VehicleAssignment.objects.create(
+            vehicle=self.vehicle,
+            driver=self.biker,
+            assigned_at=now,
+            start_mileage_record=start,
+        )
+
+        response = self.client.get("/api/vehicles/vehicles/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data[0]["available"])
+        self.assertEqual(response.data[0]["assigned_to"], self.biker.pk)
+
     def test_returns_only_the_active_assignment_for_vehicle(self):
         now = timezone.now()
         start = self.make_mileage(MileageRecord.Source.ASSIGNMENT_START, 10, now - timedelta(days=2))
