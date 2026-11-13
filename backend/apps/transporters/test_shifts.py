@@ -9,6 +9,7 @@ from rest_framework.test import APITestCase
 from apps.intracity.services.package_assignment import is_biker_busy
 from apps.notifications.models import Notification
 from apps.users.models import Biker, Branch, Staff
+from apps.vehicles.models import MileageRecord, Vehicle, VehicleAssignment
 
 from .models import BikerDailySession, DriverClockInterval, DriverShiftException, DriverShiftReminderSetting, WeeklyDriverShift
 from .shift_service import effective_shift, reconcile_all_drivers
@@ -71,6 +72,189 @@ class DriverShiftTests(APITestCase):
         self.assertEqual(reconcile_all_drivers(), 1)
         self.assertEqual(reconcile_all_drivers(), 0)
         self.assertFalse(BikerDailySession.objects.get(biker=self.biker).is_active)
+
+    def test_manual_deactivation_keeps_assignment_until_effective_shift_end(self):
+        vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.MOTORCYCLE,
+            registration_number="SHIFT 01",
+            make="Honda",
+            model="XR150",
+        )
+        start = MileageRecord.objects.create(
+            vehicle=vehicle,
+            odometer_km=100,
+            recorded_at=self.now,
+            source=MileageRecord.Source.ASSIGNMENT_START,
+        )
+        assignment = VehicleAssignment.objects.create(
+            vehicle=vehicle,
+            driver=self.biker,
+            assigned_at=self.now,
+            start_mileage_record=start,
+        )
+        self.client.force_authenticate(user=self.driver_user)
+        self.client.patch(self.activation, {"is_biker_activated": True})
+        self.set_time(10)
+        self.client.patch(self.activation, {"is_biker_activated": False})
+        self.set_time(11)
+        self.assertEqual(
+            self.client.patch(self.activation, {"is_biker_activated": True}).status_code,
+            200,
+        )
+        assignment.refresh_from_db()
+        self.assertFalse(assignment.finish_mileage_required)
+        self.assertIsNone(assignment.released_at)
+        self.client.patch(self.activation, {"is_biker_activated": False})
+        assignment.refresh_from_db()
+        self.assertFalse(assignment.finish_mileage_required)
+        self.assertIsNone(assignment.released_at)
+
+        DriverShiftException.objects.create(
+            biker=self.biker,
+            date=self.now.date(),
+            is_open=True,
+            start_time=time(8),
+            end_time=time(12, 30),
+        )
+        self.set_time(12, 29)
+        reconcile_all_drivers()
+        assignment.refresh_from_db()
+        self.assertFalse(assignment.finish_mileage_required)
+        self.set_time(12, 30)
+        reconcile_all_drivers()
+        assignment.refresh_from_db()
+        self.assertTrue(assignment.finish_mileage_required)
+        notice = Notification.objects.get(event_type="shift.closed", user=self.driver_user)
+        self.assertIn("finish mileage", notice.body.lower())
+
+    def test_assignment_without_clock_session_becomes_pending_at_shift_end(self):
+        vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.MOTORCYCLE,
+            registration_number="SHIFT 02",
+            make="Honda",
+            model="XR150",
+        )
+        start = MileageRecord.objects.create(
+            vehicle=vehicle,
+            odometer_km=200,
+            recorded_at=self.now,
+            source=MileageRecord.Source.ASSIGNMENT_START,
+        )
+        assignment = VehicleAssignment.objects.create(
+            vehicle=vehicle,
+            driver=self.biker,
+            assigned_at=self.now,
+            start_mileage_record=start,
+        )
+        self.set_time(17)
+        reconcile_all_drivers()
+        assignment.refresh_from_db()
+        self.assertTrue(assignment.finish_mileage_required)
+        self.assertEqual(Notification.objects.filter(
+            user=self.driver_user,
+            event_type="shift.closed",
+        ).count(), 1)
+
+    def test_historical_closed_session_does_not_mark_todays_assignment_pending(self):
+        vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.MOTORCYCLE,
+            registration_number="SHIFT 03",
+            make="Honda",
+            model="XR150",
+        )
+        start = MileageRecord.objects.create(
+            vehicle=vehicle,
+            odometer_km=300,
+            recorded_at=self.now,
+            source=MileageRecord.Source.ASSIGNMENT_START,
+        )
+        assignment = VehicleAssignment.objects.create(
+            vehicle=vehicle,
+            driver=self.biker,
+            assigned_at=self.now,
+            start_mileage_record=start,
+        )
+        previous_day = self.now.date() - timedelta(days=1)
+        WeeklyDriverShift.objects.filter(weekday=previous_day.weekday()).update(
+            is_open=False,
+            start_time=None,
+            end_time=None,
+        )
+        old_session_start = timezone.make_aware(datetime.combine(previous_day, time(8)))
+        old_session = BikerDailySession.objects.create(
+            biker=self.biker,
+            date=previous_day,
+            start_time=old_session_start,
+            end_time=old_session_start + timedelta(hours=1),
+            is_active=False,
+        )
+        DriverClockInterval.objects.create(
+            session=old_session,
+            clocked_in_at=old_session_start,
+            clocked_out_at=old_session.end_time,
+            clock_out_reason=DriverClockInterval.MANUAL,
+        )
+
+        self.set_time(14, 48)
+        reconcile_all_drivers()
+
+        assignment.refresh_from_db()
+        self.assertFalse(assignment.finish_mileage_required)
+        self.assertEqual(
+            Notification.objects.filter(event_type="shift.closed").count(),
+            0,
+        )
+
+    def test_scheduler_still_closes_stale_active_sessions_from_previous_days(self):
+        previous_day = self.now.date() - timedelta(days=1)
+        session_start = timezone.make_aware(datetime.combine(previous_day, time(8)))
+        session = BikerDailySession.objects.create(
+            biker=self.biker,
+            date=previous_day,
+            start_time=session_start,
+            is_active=True,
+        )
+        interval = DriverClockInterval.objects.create(
+            session=session,
+            clocked_in_at=session_start,
+        )
+
+        self.assertEqual(reconcile_all_drivers(), 1)
+
+        session.refresh_from_db()
+        interval.refresh_from_db()
+        self.assertFalse(session.is_active)
+        self.assertEqual(interval.clock_out_reason, DriverClockInterval.SCHEDULED)
+        self.assertEqual(interval.clocked_out_at, timezone.make_aware(datetime.combine(previous_day, time(17))))
+
+    def test_reconciliation_clears_same_day_pending_flag_before_shift_end(self):
+        vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.MOTORCYCLE,
+            registration_number="SHIFT 04",
+            make="Honda",
+            model="XR150",
+        )
+        start = MileageRecord.objects.create(
+            vehicle=vehicle,
+            odometer_km=400,
+            recorded_at=self.now,
+            source=MileageRecord.Source.ASSIGNMENT_START,
+        )
+        assignment = VehicleAssignment.objects.create(
+            vehicle=vehicle,
+            driver=self.biker,
+            assigned_at=self.now,
+            start_mileage_record=start,
+            finish_mileage_required=True,
+        )
+        self.set_time(14, 48)
+
+        from .shift_service import reconcile_driver
+
+        reconcile_driver(self.biker)
+
+        assignment.refresh_from_db()
+        self.assertFalse(assignment.finish_mileage_required)
 
     def test_staff_api_and_immediate_early_close(self):
         self.client.force_authenticate(user=self.driver_user)
@@ -154,7 +338,8 @@ class DriverShiftTests(APITestCase):
         self.client.patch(self.activation, {'is_biker_activated': False})
         self.set_time(17)
         reconcile_all_drivers()
-        self.assertEqual(Notification.objects.count(), 1)
+        self.assertEqual(Notification.objects.filter(event_type='shift.closed').count(), 1)
+        self.assertEqual(Notification.objects.count(), 2)
 
     def test_cutoff_edit_can_issue_new_warning_and_immediate_close_skips_warning(self):
         self.client.force_authenticate(user=self.driver_user)

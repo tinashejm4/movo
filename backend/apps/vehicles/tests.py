@@ -138,6 +138,28 @@ class VehicleAssignmentByVehicleTests(TestCase):
             recorded_by=self.staff_user,
         )
 
+    def test_vehicle_list_reports_availability_and_assigned_biker_id(self):
+        self.client.force_authenticate(self.staff_user)
+
+        response = self.client.get("/api/vehicles/vehicles/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data[0]["available"])
+        self.assertIsNone(response.data[0]["assigned_to"])
+
+        now = timezone.now()
+        start = self.make_mileage(MileageRecord.Source.ASSIGNMENT_START, 10, now)
+        VehicleAssignment.objects.create(
+            vehicle=self.vehicle,
+            driver=self.biker,
+            assigned_at=now,
+            start_mileage_record=start,
+        )
+
+        response = self.client.get("/api/vehicles/vehicles/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data[0]["available"])
+        self.assertEqual(response.data[0]["assigned_to"], self.biker.pk)
+
     def test_returns_only_the_active_assignment_for_vehicle(self):
         now = timezone.now()
         start = self.make_mileage(MileageRecord.Source.ASSIGNMENT_START, 10, now - timedelta(days=2))
@@ -580,6 +602,61 @@ class VehicleAssignmentWriteTests(TestCase):
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["start_mileage_record"], start_record.pk)
+
+    def test_create_defaults_start_mileage_to_previous_release(self):
+        prior = self.create_active_assignment()
+        release = MileageRecord.objects.create(
+            vehicle=self.vehicle,
+            odometer_km=145,
+            recorded_at=timezone.now() - timedelta(minutes=1),
+            source=MileageRecord.Source.ASSIGNMENT_RELEASE,
+            recorded_by=self.staff_user,
+        )
+        prior.released_at = release.recorded_at
+        prior.release_mileage_record = release
+        prior.released_by = self.staff_user
+        prior.save(update_fields=("released_at", "release_mileage_record", "released_by"))
+        assigned_at = timezone.now()
+        response = self.client.post(
+            "/api/vehicles/assignments/",
+            {
+                "vehicle": self.vehicle.pk,
+                "driver": self.next_driver.pk,
+                "assigned_at": assigned_at.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        assignment = VehicleAssignment.objects.get(pk=response.data["id"])
+        self.assertEqual(assignment.start_mileage_record.odometer_km, 145)
+
+    def test_biker_can_finish_assignment_only_when_finish_mileage_is_required(self):
+        assignment = self.create_active_assignment(odometer=100)
+        url = f"/api/vehicles/assignments/{assignment.pk}/finish/"
+        self.client.force_authenticate(self.driver.user)
+        early = self.client.post(url, {"release_mileage_km": 110}, format="json")
+        self.assertEqual(early.status_code, 400)
+        assignment.finish_mileage_required = True
+        assignment.save(update_fields=("finish_mileage_required",))
+        too_low = self.client.post(url, {"release_mileage_km": 99}, format="json")
+        self.assertEqual(too_low.status_code, 400)
+        finished = self.client.post(url, {"release_mileage_km": 120}, format="json")
+        self.assertEqual(finished.status_code, 200, finished.data)
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.release_mileage_record.odometer_km, 120)
+        self.assertFalse(assignment.finish_mileage_required)
+
+    def test_biker_cannot_finish_another_drivers_assignment(self):
+        assignment = self.create_active_assignment(driver=self.next_driver)
+        assignment.finish_mileage_required = True
+        assignment.save(update_fields=("finish_mileage_required",))
+        self.client.force_authenticate(self.driver.user)
+        response = self.client.post(
+            f"/api/vehicles/assignments/{assignment.pk}/finish/",
+            {"release_mileage_km": 110},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
 
     def test_create_rejects_driver_already_assigned_without_orphan_mileage(self):
         self.create_active_assignment()

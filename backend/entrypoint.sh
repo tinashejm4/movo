@@ -1,22 +1,26 @@
 #!/bin/sh
 set -e
 
-echo "Running checks..."
-python manage.py check
+if [ "${SKIP_DJANGO_SETUP:-0}" != "1" ]; then
+  echo "Running checks..."
+  python manage.py check
 
-echo "Running Django migrations..."
-python manage.py migrate --noinput
+  echo "Running Django migrations..."
+  python manage.py migrate --noinput
 
-echo "Running Django migrations..."
-python manage.py collectstatic --noinput
+  echo "Collecting static files..."
+  python manage.py collectstatic --noinput
 
-# Optionally create superuser automatically if env vars are set
-if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ] && [ "$DJANGO_SUPERUSER_EMAIL" ]; then
-  echo "Creating superuser..."
-  python manage.py createsuperuser \
-    --noinput \
-    --username "$DJANGO_SUPERUSER_USERNAME" \
-    --email "$DJANGO_SUPERUSER_EMAIL" || true
+  # Optionally create superuser automatically if env vars are set
+  if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ] && [ "$DJANGO_SUPERUSER_EMAIL" ]; then
+    echo "Creating superuser..."
+    python manage.py createsuperuser \
+      --noinput \
+      --username "$DJANGO_SUPERUSER_USERNAME" \
+      --email "$DJANGO_SUPERUSER_EMAIL" || true
+  fi
+else
+  echo "Skipping Django setup in this process; the backend service owns migrations."
 fi
 
 # The worker service supplies a Celery command through Docker Compose.  Do not

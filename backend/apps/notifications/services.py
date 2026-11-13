@@ -79,14 +79,15 @@ def queue_driver_shift_notification(*, biker, interval, cutoff, event_type):
     """Persist one shift alert per clock-in interval and effective cutoff."""
     if event_type not in {"shift.closing_soon", "shift.closed"}:
         raise ValueError("Unsupported driver shift notification")
-    key = f"{event_type}:{interval.pk}:{cutoff.isoformat()}"
+    interval_key = str(interval.pk) if interval is not None else f"biker-{biker.pk}"
+    key = f"{event_type}:{interval_key}:{cutoff.isoformat()}"
     clock_time = cutoff.strftime("%H:%M")
     title, body = (
         ("Shift ending soon", f"Your shift closes at {clock_time}.")
         if event_type == "shift.closing_soon"
         else (
-            "Shift closed",
-            "Your shift has closed. You will not receive new orders.",
+            "Shift ended",
+            "Your shift has closed. If you have a bike assigned, enter its finish mileage.",
         )
     )
     try:
