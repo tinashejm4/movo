@@ -235,6 +235,52 @@ class AccountExpenseViewsTests(APITestCase):
 		self.assertEqual(expense.expense_type, self.expense_type)
 		self.assertEqual(expense.ledger_entry.transaction_type, "expense")
 		self.assertEqual(str(expense.ledger_entry.amount), "-12.50")
+		self.assertEqual(timezone.localtime(expense.actual_date).date(), timezone.localdate())
+
+	def test_creates_backdated_expense_and_recalculates_ledger(self):
+		existing = Expense.objects.create(account=self.account, expense_type=self.expense_type, amount=10)
+		other = Expense.objects.create(account=self.other_account, expense_type=self.expense_type, amount=4)
+		day = timezone.localdate() - timedelta(days=3)
+		response = self.client.post(
+			reverse("create_expense_view"),
+			{
+				"account_id": self.account.id,
+				"expense_type_id": self.expense_type.id,
+				"amount": "5.25",
+				"actual_date": day.isoformat(),
+			},
+			format="multipart",
+		)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		expense = Expense.objects.get(pk=response.data["expense_id"])
+		self.assertEqual(timezone.localtime(expense.actual_date).date(), day)
+		self.assertEqual(expense.actual_date, expense.ledger_entry.actual_date)
+		self.assertEqual(expense.ledger_entry.running_balance, Decimal("-5.25"))
+		existing.ledger_entry.refresh_from_db()
+		self.assertEqual(existing.ledger_entry.running_balance, Decimal("-15.25"))
+		other.ledger_entry.refresh_from_db()
+		self.assertEqual(other.ledger_entry.running_balance, Decimal("-4.00"))
+		self.assertEqual(Decimal(str(self.account.get_balance())), Decimal("-15.25"))
+		url = reverse("list_expenses_view", kwargs={"account_id": self.account.id})
+		result = self.client.get(url, {"start_date": day.isoformat(), "end_date": day.isoformat()})
+		self.assertEqual([item["id"] for item in result.data["expenses"]], [expense.id])
+		transactions = self.client.get(
+			reverse("account_transactions_view", kwargs={"account_id": self.account.id}),
+			{"start_date": day.isoformat(), "end_date": day.isoformat()},
+		)
+		self.assertEqual([item["id"] for item in transactions.data["transactions"]], [expense.ledger_entry_id])
+
+	def test_rejects_invalid_expense_dates(self):
+		for value in ("", "2026-2-03", "2026-02-30", "not-a-date", (timezone.localdate() + timedelta(days=1)).isoformat()):
+			with self.subTest(value=value):
+				response = self.client.post(
+					reverse("create_expense_view"),
+					{"account_id": self.account.id, "expense_type_id": self.expense_type.id, "amount": "5", "actual_date": value},
+					format="multipart",
+				)
+				self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertFalse(Expense.objects.exists())
+		self.assertFalse(LedgerEntry.objects.exists())
 
 	def test_rejects_non_positive_and_invalid_amounts(self):
 		for amount in ("0", "-1", "NaN", "abc"):

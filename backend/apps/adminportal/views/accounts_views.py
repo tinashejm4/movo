@@ -55,7 +55,7 @@ class AccountTransactionsView(APIView):
         account = get_object_or_404(Account, id=account_id)
         transactions = LedgerEntry.objects.filter(account=account).select_related(
             "intracity_sale", "expense", "charge", "transfer_out", "transfer_in"
-        )
+        ).order_by("actual_date","-pk")
 
         if start_date and end_date:
             transactions = transactions.filter(actual_date__date__range=[start_date, end_date])
@@ -100,6 +100,13 @@ class ExpenseClassView(APIView):
         }
         return Response(context, status=status.HTTP_200_OK)
 
+
+def set_expense_date(expense, day):
+    actual_date = timezone.make_aware(datetime.combine(day, time.min), timezone.get_current_timezone())
+    Expense.objects.filter(pk=expense.pk).update(actual_date=actual_date)
+    LedgerEntry.objects.filter(pk=expense.ledger_entry_id).update(actual_date=actual_date)
+
+
 class CreateExpenseView(APIView):
     permission_classes = [IsAuthenticated, IsStaff]
 
@@ -110,6 +117,20 @@ class CreateExpenseView(APIView):
         description = request.data.get("description", "")
         supplier = request.data.get("supplier", "")
         image = request.data.get("image")
+        raw_date = request.data.get("actual_date")
+
+        day = None
+        if raw_date is not None:
+            try:
+                if not isinstance(raw_date, str):
+                    raise ValueError
+                day = datetime.strptime(raw_date, "%Y-%m-%d").date()
+                if day.isoformat() != raw_date:
+                    raise ValueError
+            except ValueError:
+                return Response({"error": "Expense date must use YYYY-MM-DD format."}, status=status.HTTP_400_BAD_REQUEST)
+            if day > timezone.localdate():
+                return Response({"error": "Future expense dates are not supported."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             expense_amount = Decimal(str(amount))
@@ -118,18 +139,23 @@ class CreateExpenseView(APIView):
         except (InvalidOperation, ValueError):
             return Response({"error": "Amount must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
 
-        account = get_object_or_404(Account, id=account_id)
         expense_type = get_object_or_404(ExpenseAccount, id=expense_type_id)
 
         with transaction.atomic():
-            expense = Expense.objects.create(
-                account=account,
-                expense_type=expense_type,
-                amount=expense_amount,
-                description=description,
-                supplier=supplier,
-                added_by=request.user
-            )
+            account = get_object_or_404(Account.objects.select_for_update(), id=account_id)
+            expense_data = {
+                "account": account,
+                "expense_type": expense_type,
+                "amount": expense_amount,
+                "description": description,
+                "supplier": supplier,
+                "added_by": request.user,
+            }
+            if day is not None:
+                expense_data["actual_date"] = timezone.make_aware(
+                    datetime.combine(day, time.min), timezone.get_current_timezone()
+                )
+            expense = Expense.objects.create(**expense_data)
             GeneralExpense.objects.create(expense=expense, added_by=request.user)
             if image:
                 Receipt.objects.create(expense=expense, image=image)
@@ -210,14 +236,9 @@ class BulkExpensesView(APIView):
                         supplier=supplier, description=description, added_by=request.user, import_id=import_id,
                     )
                     GeneralExpense.objects.create(expense=expense, added_by=request.user)
-                    actual_date = timezone.make_aware(datetime.combine(day, time.min), timezone.get_current_timezone())
-                    Expense.objects.filter(pk=expense.pk).update(actual_date=actual_date)
-                    LedgerEntry.objects.filter(pk=expense.ledger_entry_id).update(actual_date=actual_date)
+                    set_expense_date(expense, day)
 
-                balance = Decimal("0.00")
-                for entry in LedgerEntry.objects.filter(account=account).order_by("actual_date", "pk").iterator():
-                    balance += entry.amount
-                    LedgerEntry.objects.filter(pk=entry.pk).update(running_balance=balance)
+                LedgerEntry.recalculate_account_balances(account.pk)
         except IntegrityError:
             return Response({"error": "An expense ID was already imported or a database constraint failed. No expenses were added."}, status=status.HTTP_409_CONFLICT)
         return Response({"imported": len(parsed)}, status=status.HTTP_201_CREATED)

@@ -1,16 +1,19 @@
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from io import BytesIO
 from tempfile import TemporaryDirectory
+import uuid
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.bookkeeping.models import Account, Asset, AssetImage, CapitalExpense, GeneralExpense, ExpenseAccount, LedgerEntry
+from apps.bookkeeping.models import Account, Asset, AssetImage, CapitalExpense, Expense, GeneralExpense, ExpenseAccount, LedgerEntry
 from apps.users.models import Branch, Staff
 
 
@@ -60,8 +63,74 @@ class AssetsViewTests(APITestCase):
         expense = CapitalExpense.objects.get(pk=response.data["capital_expense_id"])
         self.assertEqual(expense.expense.description, "Purchase")
 
+    def test_backdated_initial_capital_expense_recalculates_later_balances(self):
+        earlier = LedgerEntry.objects.create(
+            account=self.account,
+            entry_type=LedgerEntry.CREDIT,
+            amount=Decimal("300.00"),
+            running_balance=Decimal("0.00"),
+            actual_date=datetime(2024, 1, 1, tzinfo=dt_timezone.utc),
+            transaction_type="sale",
+            reference=uuid.uuid4(),
+        )
+        later_date = datetime(2024, 1, 3, tzinfo=dt_timezone.utc)
+        later_expense = Expense.objects.create(
+            account=self.account,
+            expense_type=self.expense_type,
+            amount=10,
+            actual_date=later_date,
+        )
+        other_account = Account.objects.create(name="Other")
+        other = Expense.objects.create(account=other_account, expense_type=self.expense_type, amount=7)
+        final = LedgerEntry.objects.create(
+            account=self.account,
+            entry_type=LedgerEntry.CREDIT,
+            amount=Decimal("20.00"),
+            running_balance=Decimal("0.00"),
+            actual_date=datetime(2024, 1, 4, tzinfo=dt_timezone.utc),
+            transaction_type="sale",
+            reference=uuid.uuid4(),
+        )
+
+        response = self.client.post(
+            self.url,
+            {**self.data, "actual_date": "2024-01-02"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        capital_expense = CapitalExpense.objects.get(pk=response.data["capital_expense_id"])
+        self.assertEqual(
+            timezone.localtime(capital_expense.expense.actual_date).date().isoformat(),
+            "2024-01-02",
+        )
+        self.assertEqual(
+            capital_expense.expense.actual_date,
+            capital_expense.expense.ledger_entry.actual_date,
+        )
+        self.assertEqual(
+            capital_expense.expense.ledger_entry.running_balance,
+            Decimal("174.50"),
+        )
+        earlier.refresh_from_db()
+        later_expense.ledger_entry.refresh_from_db()
+        final.refresh_from_db()
+        other.ledger_entry.refresh_from_db()
+        self.assertEqual(earlier.running_balance, Decimal("300.00"))
+        self.assertEqual(later_expense.ledger_entry.running_balance, Decimal("164.50"))
+        self.assertEqual(final.running_balance, Decimal("184.50"))
+        self.assertEqual(other.ledger_entry.running_balance, Decimal("-7.00"))
+        self.assertEqual(self.account.get_balance(), Decimal("184.50"))
+
     def test_invalid_or_duplicate_requests_do_not_create_ledger_entries(self):
-        for overrides in ({"amount": "0"}, {"account_id": 999999}, {"expense_type_id": 999999}, {"asset_type": "invalid"}):
+        for overrides in (
+            {"amount": "0"},
+            {"account_id": 999999},
+            {"expense_type_id": 999999},
+            {"asset_type": "invalid"},
+            {"actual_date": "not-a-date"},
+            {"actual_date": (timezone.localdate() + timedelta(days=1)).isoformat()},
+        ):
             with self.subTest(overrides=overrides):
                 response = self.client.post(self.url, {**self.data, **overrides}, format="json")
                 self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

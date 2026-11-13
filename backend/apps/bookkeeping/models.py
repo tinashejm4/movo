@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+from django.utils import timezone
 from decimal import Decimal
 import uuid
 
@@ -32,16 +34,16 @@ class Account(models.Model):
             entries = entries.filter(actual_date__lte=at_datetime)
         balance = entries.order_by("-actual_date", "-pk").first()
         if balance:
-            return float(balance.running_balance)
+            return Decimal(balance.running_balance)
         if at_datetime:
             legacy_balance = LedgerEntry.objects.filter(account=self).filter(actual_date__lte=at_datetime)
         else:
             legacy_balance = LedgerEntry.objects.filter(account=self)
         legacy_balance = legacy_balance.order_by("-actual_date", "-pk").first()
         return (
-            float(legacy_balance.running_balance)
+            Decimal(legacy_balance.running_balance)
             if legacy_balance
-            else 0.00
+            else Decimal("0.00")
         )
 
 class LedgerEntry(models.Model):
@@ -68,13 +70,22 @@ class LedgerEntry(models.Model):
     entry_type = models.CharField(max_length=10,choices=ENTRY_TYPES)
     amount = models.DecimalField(max_digits=12,decimal_places=2)
     running_balance = models.DecimalField(max_digits=12,decimal_places=2)
-    actual_date = models.DateTimeField(auto_now_add=True)
+    actual_date = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     transaction_type = models.CharField(max_length=255, choices=TRANSACTION_TYPES)
     reference = models.UUIDField()
 
     def __str__(self):
         return f"{self.account} - {self.entry_type} - {self.amount}"
+
+    @classmethod
+    def recalculate_account_balances(cls, account_id):
+        balance = Decimal("0.00")
+        entries = cls.objects.filter(account_id=account_id).order_by("actual_date", "pk")
+        for entry in entries.iterator():
+            balance += entry.amount
+            if entry.running_balance != balance:
+                cls.objects.filter(pk=entry.pk).update(running_balance=balance)
 
     @property
     def source(self):
@@ -93,16 +104,18 @@ class LedgerEntry(models.Model):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-        amount = round(abs(float(str(self.amount))), 2)
+        if not self.actual_date:
+            self.actual_date = timezone.now()
+        amount = round(abs(Decimal(str(self.amount))), 2)
         if self.entry_type == self.DEBIT:
             amount = -amount
         elif self.entry_type != self.CREDIT:
             raise ValueError(f"Unsupported ledger entry type: {self.entry_type}")
-        self.amount = float(amount)
+        self.amount = Decimal(amount)
 
         if self._state.adding:
             account = Account.objects.select_for_update().get(pk=self.account_id)
-            self.running_balance = account.get_balance() + float(self.amount)
+            self.running_balance = account.get_balance() + Decimal(self.amount)
 
         super().save(*args, **kwargs)
 
@@ -127,22 +140,22 @@ class IntracitySale(models.Model):
     def save(self, *args, **kwargs):
         if self.ledger_entry_id:
             self.account = self.ledger_entry.account
-            self.amount = float(self.ledger_entry.amount)
+            self.amount = Decimal(self.ledger_entry.amount)
         else:
             if not self.account_id:
                 raise ValueError("An account is required to record an intracity sale.")
-            amount = round(abs(float(str(self.amount))), 2)
+            amount = round(abs(Decimal(str(self.amount))), 2)
             if not amount and self.invoice_id:
-                amount = round(abs(float(str(self.invoice.amount))), 2)
+                amount = round(abs(Decimal(str(self.invoice.amount))), 2)
             self.ledger_entry = LedgerEntry.objects.create(
                 account=self.account,
                 entry_type=LedgerEntry.CREDIT,
                 amount=amount,
-                running_balance=float("0.00"),
+                running_balance=Decimal("0.00"),
                 transaction_type="sale",
                 reference=uuid.uuid4(),
             )
-            self.amount = float(self.ledger_entry.amount)
+            self.amount = Decimal(self.ledger_entry.amount)
 
         if not self.description and self.invoice_id:
             self.description = self.invoice.package.slug
@@ -194,7 +207,7 @@ class Expense(models.Model):
     supplier = models.CharField(max_length = 100, blank = True, null = True)
     import_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     description = models.TextField(blank = True, null = True)
-    actual_date = models.DateTimeField(auto_now_add=True)
+    actual_date = models.DateTimeField()
     is_reversed = models.BooleanField(default=False)
     reversed_at = models.DateTimeField(blank=True, null=True)
     reversed_by = models.ForeignKey(
@@ -212,21 +225,26 @@ class Expense(models.Model):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
+        if not self.actual_date:
+            self.actual_date = timezone.now()
         if self.ledger_entry_id:
             self.account = self.ledger_entry.account
-            self.amount = abs(float(self.ledger_entry.amount))
+            self.amount = abs(Decimal(self.ledger_entry.amount))
         else:
             if not self.account_id:
                 raise ValueError("An account is required to record an expense.")
             self.ledger_entry = LedgerEntry.objects.create(
                 account=self.account,
                 entry_type=LedgerEntry.DEBIT,
-                amount=float(str(self.amount)),
-                running_balance=float("0.00"),
+                amount=Decimal(str(self.amount)),
+                running_balance=Decimal("0.00"),
+                actual_date=self.actual_date,
                 transaction_type="expense",
                 reference=uuid.uuid4(),
             )
-            self.amount = abs(float(self.ledger_entry.amount))
+            self.amount = abs(Decimal(self.ledger_entry.amount))
+            LedgerEntry.recalculate_account_balances(self.account_id)
+            self.ledger_entry.refresh_from_db(fields=["running_balance"])
         super().save(*args, **kwargs)
 
 class Receipt(models.Model):
@@ -311,7 +329,7 @@ class FundsTransfer(models.Model):
                 raise ValueError("Both accounts are required for a funds transfer.")
             if self.from_account_id == self.to_account_id:
                 raise ValueError("A funds transfer must use two different accounts.")
-            amount = float(str(self.amount))
+            amount = Decimal(str(self.amount))
             if amount <= 0:
                 raise ValueError("A funds transfer amount must be greater than zero.")
 
@@ -325,7 +343,7 @@ class FundsTransfer(models.Model):
                 account=self.from_account,
                 amount=amount,
                 entry_type=LedgerEntry.DEBIT,
-                running_balance=float("0.00"),
+                running_balance=Decimal("0.00"),
                 transaction_type="transfer out",
                 reference=reference,
             )
@@ -333,17 +351,17 @@ class FundsTransfer(models.Model):
                 account=self.to_account,
                 amount=amount,
                 entry_type=LedgerEntry.CREDIT,
-                running_balance=float("0.00"),
+                running_balance=Decimal("0.00"),
                 transaction_type="transfer in",
                 reference=reference,
             )
-            self.amount = abs(float(self.from_account_ledger_entry.amount))
+            self.amount = abs(Decimal(self.from_account_ledger_entry.amount))
         elif not self.from_account_ledger_entry_id or not self.to_account_ledger_entry_id:
             raise ValueError("Both ledger entries are required for a linked transfer.")
         else:
             self.from_account = self.from_account_ledger_entry.account
             self.to_account = self.to_account_ledger_entry.account
-            self.amount = abs(float(self.from_account_ledger_entry.amount))
+            self.amount = abs(Decimal(self.from_account_ledger_entry.amount))
 
         if not self.description:
             self.description = (
@@ -376,19 +394,19 @@ class Charge(models.Model):
     def save(self, *args, **kwargs):
         if self.ledger_entry_id:
             self.account = self.ledger_entry.account
-            self.amount = abs(float(self.ledger_entry.amount))
+            self.amount = abs(Decimal(self.ledger_entry.amount))
         else:
             if not self.account_id:
                 raise ValueError("An account is required to record a charge.")
             self.ledger_entry = LedgerEntry.objects.create(
                 account=self.account,
-                amount=float(str(self.amount)),
+                amount=Decimal(str(self.amount)),
                 entry_type=LedgerEntry.DEBIT,
-                running_balance=float("0.00"),
+                running_balance=Decimal("0.00"),
                 transaction_type="charge",
                 reference=uuid.uuid4(),
             )
-            self.amount = abs(float(self.ledger_entry.amount))
+            self.amount = abs(Decimal(self.ledger_entry.amount))
 
         if not self.description:
             self.description = f"Charge for {self.account}"

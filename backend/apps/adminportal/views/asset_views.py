@@ -1,9 +1,11 @@
+from datetime import datetime, time
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
@@ -24,10 +26,16 @@ class AssetCreateSerializer(serializers.Serializer):
     expense_type_id = serializers.PrimaryKeyRelatedField(queryset=ExpenseAccount.objects.all(), source="expense_type")
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     expense_description = serializers.CharField(required=False, allow_blank=True, default="")
+    actual_date = serializers.DateField(required=False)
 
     def validate_unique_identifier(self, value):
         if Asset.objects.filter(unique_identifier=value).exists():
             raise serializers.ValidationError("An asset with this identifier already exists.")
+        return value
+
+    def validate_actual_date(self, value):
+        if value > timezone.localdate():
+            raise serializers.ValidationError("Future expense dates are not supported.")
         return value
 
 
@@ -78,14 +86,20 @@ class AssetsView(APIView):
                     supplier=data["supplier"],
                     description=data["description"],
                 )
-                expense = Expense.objects.create(
-                    account=data["account"],
-                    expense_type=data["expense_type"],
-                    amount=data["amount"],
-                    supplier=data["supplier"],
-                    description=data["expense_description"] or f'{asset.name} - {asset.unique_identifier}',
-                    added_by=request.user,
-                )
+                expense_data = {
+                    "account": data["account"],
+                    "expense_type": data["expense_type"],
+                    "amount": data["amount"],
+                    "supplier": data["supplier"],
+                    "description": data["expense_description"] or f'{asset.name} - {asset.unique_identifier}',
+                    "added_by": request.user,
+                }
+                if "actual_date" in data:
+                    expense_data["actual_date"] = timezone.make_aware(
+                        datetime.combine(data["actual_date"], time.min),
+                        timezone.get_current_timezone(),
+                    )
+                expense = Expense.objects.create(**expense_data)
                 capital = CapitalExpense.objects.create(asset=asset, expense=expense, added_by=request.user)
         except IntegrityError:
             if Asset.objects.filter(unique_identifier=data["unique_identifier"]).exists():

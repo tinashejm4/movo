@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 
@@ -74,6 +75,48 @@ class IntracitySaleLedgerTests(TestCase):
         self.assertEqual(charge.ledger_entry.running_balance, Decimal("-4.50"))
         self.assertIsNotNone(expense.running_balance)
         self.assertIsNotNone(charge.running_balance)
+
+    def test_backdated_expense_recalculates_later_ledger_balances(self):
+        first_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        later_date = datetime(2024, 1, 3, tzinfo=timezone.utc)
+        backdated_date = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        first = Expense.objects.create(
+            account=self.account,
+            expense_type=self.expense_type,
+            amount=100,
+            actual_date=first_date,
+        )
+        later = Expense.objects.create(
+            account=self.account,
+            expense_type=self.expense_type,
+            amount=50,
+            actual_date=later_date,
+        )
+
+        backdated = Expense.objects.create(
+            account=self.account,
+            expense_type=self.expense_type,
+            amount=25,
+            actual_date=backdated_date,
+        )
+
+        entries = list(
+            LedgerEntry.objects.filter(account=self.account).order_by("actual_date", "pk")
+        )
+        self.assertEqual(
+            [entry.running_balance for entry in entries],
+            [Decimal("-100.00"), Decimal("-125.00"), Decimal("-175.00")],
+        )
+        later.ledger_entry.refresh_from_db()
+        first.ledger_entry.refresh_from_db()
+        backdated.ledger_entry.refresh_from_db()
+        self.assertEqual(later.ledger_entry.running_balance, Decimal("-175.00"))
+        self.assertEqual(first.ledger_entry.running_balance, Decimal("-100.00"))
+        self.assertEqual(backdated.ledger_entry.actual_date, backdated_date)
+        self.assertEqual(
+            self.account.get_balance(),
+            -175.0,
+        )
 
     def test_transfer_creates_balanced_entries_on_both_accounts(self):
         source = Account.objects.create(name="Source")

@@ -491,8 +491,6 @@ class CustomerRegisterLoginView(APIView):
                 }
             )
 
-        o
-
         user = User.objects.create_user(
             username=username, password=CUSTOMER_DEFAULT_PASSWORD
         )
