@@ -98,7 +98,8 @@ class VehicleAssignment(models.Model):
         blank=True,
         related_name="vehicle_assignments_released",
     )
-    handover_notes = models.TextField(blank=True)
+    finish_mileage_required = models.BooleanField(default=False)
+    handover_notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

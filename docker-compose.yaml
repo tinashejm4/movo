@@ -36,6 +36,7 @@ services:
       - .env
     environment:
       DEBUG: ${DEBUG:-1}
+      SKIP_DJANGO_SETUP: "1"
       DB_NAME: movo_db
       DB_USER: movo_user
       DB_PASSWORD: movo_password
@@ -59,6 +60,7 @@ services:
       - .env
     environment:
       DEBUG: ${DEBUG:-1}
+      SKIP_DJANGO_SETUP: "1"
       DB_NAME: movo_db
       DB_USER: movo_user
       DB_PASSWORD: movo_password
