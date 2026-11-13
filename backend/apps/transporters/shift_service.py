@@ -59,35 +59,62 @@ def clock_out(session, *, now, reason, boundary=None):
             biker=session.biker,
             interval=interval,
             cutoff=cutoff,
+            shift_date=session.date,
+            now=now,
         )
     return True
 
 
-def mark_assignment_return_pending(*, biker, interval, cutoff):
+def mark_assignment_return_pending(*, biker, interval, cutoff, shift_date, now):
+    from apps.vehicles.models import VehicleAssignment
+
+    shift = effective_shift(biker, shift_date)
+    assignment = VehicleAssignment.objects.select_for_update().filter(
+        driver=biker,
+        released_at__isnull=True,
+        assigned_at__date=shift_date,
+        assigned_at__lte=cutoff,
+    ).first()
+    if assignment is not None and shift["is_open"] and now >= scheduled_end(shift):
+        if not assignment.finish_mileage_required:
+            assignment.finish_mileage_required = True
+            assignment.save(update_fields=["finish_mileage_required"])
+    if shift["is_open"] and (assignment is not None or interval is not None):
+        queue_driver_shift_notification(
+            biker=biker,
+            interval=interval,
+            cutoff=scheduled_end(shift),
+            event_type="shift.closed",
+        )
+
+
+def clear_same_day_mileage_requirement(*, biker, shift, shift_date, now):
+    if not shift["is_open"] or now >= scheduled_end(shift):
+        return
     from apps.vehicles.models import VehicleAssignment
 
     assignment = VehicleAssignment.objects.select_for_update().filter(
         driver=biker,
         released_at__isnull=True,
-        assigned_at__lte=cutoff,
+        assigned_at__date=shift_date,
+        finish_mileage_required=True,
     ).first()
     if assignment is not None:
-        if not assignment.finish_mileage_required:
-            assignment.finish_mileage_required = True
-            assignment.save(update_fields=["finish_mileage_required"])
-    if assignment is not None or interval is not None:
-        queue_driver_shift_notification(
-            biker=biker,
-            interval=interval,
-            cutoff=cutoff,
-            event_type="shift.closed",
-        )
+        assignment.finish_mileage_required = False
+        assignment.save(update_fields=["finish_mileage_required"])
 
 
 @transaction.atomic
 def reconcile_driver(biker, now=None):
     now = now or timezone.now()
     day = timezone.localdate(now)
+    shift = effective_shift(biker, day)
+    clear_same_day_mileage_requirement(
+        biker=biker,
+        shift=shift,
+        shift_date=day,
+        now=now,
+    )
     session = BikerDailySession.objects.select_for_update().filter(biker=biker, date=day).first()
     if not session:
         from apps.vehicles.models import VehicleAssignment
@@ -107,9 +134,10 @@ def reconcile_driver(biker, now=None):
                 biker=biker,
                 interval=None,
                 cutoff=cutoff,
+                shift_date=assignment_day,
+                now=now,
             )
         return False
-    shift = effective_shift(biker, day)
     if session.is_active and shift_allows_work(shift, now):
         cutoff = scheduled_end(shift)
         setting, _ = DriverShiftReminderSetting.objects.get_or_create(
@@ -156,6 +184,8 @@ def reconcile_driver(biker, now=None):
         biker=biker,
         interval=interval,
         cutoff=cutoff,
+        shift_date=session.date,
+        now=now,
     )
     return False
 
@@ -163,33 +193,28 @@ def reconcile_driver(biker, now=None):
 def reconcile_all_drivers(now=None):
     now = now or timezone.now()
     today = timezone.localdate(now)
-    sessions = BikerDailySession.objects.filter(date__lte=today).select_related('biker')
+    sessions = BikerDailySession.objects.filter(date=today).select_related('biker')
     closed = 0
     for session in sessions.iterator():
-        if session.date == today:
-            closed += reconcile_driver(session.biker, now)
-        else:
-            with transaction.atomic():
-                locked = BikerDailySession.objects.select_for_update().get(pk=session.pk)
-                shift = effective_shift(locked.biker, locked.date)
-                if locked.is_active:
-                    boundary = scheduled_end(shift) if shift['is_open'] else now
-                    closed += clock_out(locked, now=now, reason=DriverClockInterval.SCHEDULED, boundary=boundary)
-                else:
-                    cutoff = scheduled_end(shift) if shift['is_open'] else now
-                    interval = locked.clock_intervals.order_by('-clocked_in_at', '-pk').first()
-                    if interval is None:
-                        interval = DriverClockInterval.objects.create(
-                            session=locked,
-                            clocked_in_at=locked.start_time,
-                            clocked_out_at=cutoff,
-                            clock_out_reason=DriverClockInterval.SCHEDULED,
-                        )
-                    mark_assignment_return_pending(
-                        biker=locked.biker,
-                        interval=interval,
-                        cutoff=cutoff,
-                    )
+        closed += reconcile_driver(session.biker, now)
+
+    # Repair only genuinely stale active sessions from previous days. Inactive
+    # historical rows are irrelevant to this minute-by-minute reconciliation.
+    stale_sessions = BikerDailySession.objects.filter(
+        date__lt=today,
+        is_active=True,
+    ).select_related("biker")
+    for session in stale_sessions.iterator():
+        with transaction.atomic():
+            locked = BikerDailySession.objects.select_for_update().get(pk=session.pk)
+            shift = effective_shift(locked.biker, locked.date)
+            boundary = scheduled_end(shift) if shift["is_open"] else now
+            closed += clock_out(
+                locked,
+                now=now,
+                reason=DriverClockInterval.SCHEDULED,
+                boundary=boundary,
+            )
     from apps.vehicles.models import VehicleAssignment
     from apps.users.models import Biker
 
