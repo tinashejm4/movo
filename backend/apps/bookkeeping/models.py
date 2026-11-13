@@ -149,6 +149,33 @@ class IntracitySale(models.Model):
 
         super().save(*args, **kwargs)
 
+class Asset(models.Model):
+    ASSET_TYPES = [
+        ('vehicle', 'Vehicle'),
+        ('equipment', 'Equipment'),
+        ('furniture', 'Furniture'),
+        ('other', 'Other')
+    ]
+
+    asset_type = models.CharField(max_length=50, choices=ASSET_TYPES)
+    name = models.CharField(max_length=100)
+    supplier = models.CharField(max_length=100, blank=True, null=True)
+    unique_identifier = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name}"
+
+class AssetImage(models.Model):
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='asset_images/')
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Image for Asset {self.asset}"
+
+
 class ExpenseAccount(models.Model):
     name = models.CharField(max_length = 50)
     description = models.TextField(blank = True, null = True)
@@ -165,6 +192,7 @@ class Expense(models.Model):
     amount = models.FloatField(default=0)
     expense_type = models.ForeignKey(ExpenseAccount, on_delete = models.CASCADE)
     supplier = models.CharField(max_length = 100, blank = True, null = True)
+    import_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     description = models.TextField(blank = True, null = True)
     actual_date = models.DateTimeField(auto_now_add=True)
     is_reversed = models.BooleanField(default=False)
@@ -202,12 +230,29 @@ class Expense(models.Model):
         super().save(*args, **kwargs)
 
 class Receipt(models.Model):
-    expense = models.OneToOneField(Expense, on_delete = models.CASCADE)
+    expense = models.OneToOneField(Expense, on_delete = models.SET_NULL, null = True)
     image = models.ImageField(upload_to = 'receipts/')
     added_at = models.DateField(auto_now_add = True)
 
     def __str__(self):
         return f"Receipt for Expense {self.expense}"
+
+class GeneralExpense(models.Model):
+    expense = models.OneToOneField(Expense, on_delete=models.CASCADE)
+    added_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"General Expense {self.expense}"
+
+class CapitalExpense(models.Model):
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='capital_expenses')
+    expense = models.OneToOneField(Expense, on_delete=models.SET_NULL, null = True)
+    added_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Capital Expense {self.expense if self.expense else 'N/A'}"
 
 class FundsTransfer(models.Model):
     from_account_ledger_entry = models.OneToOneField(
@@ -352,21 +397,11 @@ class Charge(models.Model):
     def __str__(self):
         return f"Charge of ${self.amount:0.2f} for {self.account}"
 
-class EndOfDayBalance(models.Model):
-    account = models.ForeignKey(Account, on_delete = models.CASCADE)
-    expected_balance = models.FloatField(default = 0)
-    actual_balance = models.FloatField(default = 0)
-    accepted = models.BooleanField(default = False)
-    accepted_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True, related_name = "accepted_by")  
-    added_at = models.DateField(auto_now_add = True)
-    added_by = models.ForeignKey(User, on_delete = models.SET_NULL, null = True, related_name="added_by")
-
-    def __str__(self):
-        return f"{self.account} {self.added_at}"
-    
 class ExchangeRate(models.Model):
-    rate = models.FloatField(default = 0)
-    added_at = models.DateField(auto_now_add = True)
+    base_currency = models.CharField(max_length=3, default = "USD")
+    target_currency = models.CharField(max_length=3, default = "ZWL")
+    rate = models.FloatField()
+    added_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Exchange Rate of {self.rate} added at {self.added_at}"
+        return f"Exchange rate from {self.base_currency} to {self.target_currency}: {self.rate}"

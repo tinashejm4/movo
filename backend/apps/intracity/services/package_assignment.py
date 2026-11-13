@@ -20,20 +20,16 @@ def is_biker_busy(biker):
     """Return whether a biker already has an active package."""
     now = timezone.now()
     if not shift_allows_work(effective_shift(biker, timezone.localdate(now)), now):
-        logger.warning("Biker %s is not allowed to work at this time", biker)
         return True
     session = BikerDailySession.objects.filter(
         biker=biker,
         date=timezone.localdate(),
     )
     if not session.exists():
-        logger.warning("Biker %s has no active session for today", biker)
-
         return True
 
     session = session.first()
     if not session.is_active:
-        logger.warning("Biker %s has an inactive session for today", biker)
         return True
 
     latest_status = (
@@ -84,13 +80,9 @@ def assign_pending_packages():
     )
 
     if not pending_packages:
-        logger.warning("assign_pending_packages: no pending packages found")
         return _result("No pending packages available for assignment")
 
-    logger.warning("bikers: %s", bikers)
-
     free_bikers = [biker for biker in bikers if not is_biker_busy(biker)]
-    logger.warning("free_bikers: %s", free_bikers)
 
     if not free_bikers:
         logger.warning("assign_pending_packages: no available bikers")

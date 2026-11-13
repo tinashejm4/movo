@@ -1,7 +1,9 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, router, transaction
 from django.db.models import Q
+
+from apps.bookkeeping.models import Asset
 
 
 class Vehicle(models.Model):
@@ -18,6 +20,7 @@ class Vehicle(models.Model):
         MAINTENANCE = "maintenance", "In maintenance"
         RETIRED = "retired", "Retired"
 
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="fleet_vehicles")
     vehicle_type = models.CharField(max_length=20, choices=Type.choices)
     registration_number = models.CharField(max_length=20, unique=True)
     make = models.CharField(max_length=100)
@@ -31,9 +34,23 @@ class Vehicle(models.Model):
 
     class Meta:
         ordering = ["registration_number"]
+        constraints = [
+            models.UniqueConstraint(fields=["asset"], name="vehicles_unique_asset"),
+        ]
 
     def __str__(self):
         return f"{self.registration_number} - {self.make} {self.model}"
+
+    def save(self, *args, **kwargs):
+        using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            if self._state.adding and not self.asset_id:
+                self.asset = Asset.objects.using(using).create(
+                    asset_type="vehicle",
+                    name=f"{self.make} {self.model}"[:100],
+                    unique_identifier=self.registration_number,
+                )
+            super().save(*args, **kwargs)
 
 
 class MileageRecord(models.Model):
@@ -215,7 +232,6 @@ class ServiceRecord(models.Model):
 
     def __str__(self):
         return f"{self.vehicle.registration_number}: {self.service_date}"
-
 
 class InsurancePolicy(models.Model):
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="insurance_policies")

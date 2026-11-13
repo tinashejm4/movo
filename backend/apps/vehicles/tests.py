@@ -1,12 +1,117 @@
 from datetime import timedelta
 
 from django.contrib.auth.models import User
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.bookkeeping.models import Asset
 from apps.users.models import Biker, Branch, Staff
 from .models import InsurancePolicy, LicensingRecord, MileageRecord, ServiceRecord, Vehicle, VehicleAssignment
+
+
+class VehicleAssetTests(TestCase):
+    def test_create_vehicle_creates_linked_asset(self):
+        vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.CAR,
+            registration_number="ASSET 100",
+            make="Toyota",
+            model="Corolla",
+        )
+
+        self.assertEqual(vehicle.asset.asset_type, "vehicle")
+        self.assertEqual(vehicle.asset.name, "Toyota Corolla")
+        self.assertEqual(vehicle.asset.unique_identifier, "ASSET 100")
+        self.assertEqual(vehicle.asset.fleet_vehicles.get(), vehicle)
+
+        vehicle.status = Vehicle.Status.MAINTENANCE
+        vehicle.save()
+        self.assertEqual(Asset.objects.count(), 1)
+
+    def test_failed_vehicle_creation_rolls_back_asset(self):
+        Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.CAR,
+            registration_number="ASSET 101",
+            make="Toyota",
+            model="Corolla",
+            vin="VIN-101",
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Vehicle.objects.create(
+                vehicle_type=Vehicle.Type.CAR,
+                registration_number="ASSET 102",
+                make="Honda",
+                model="Fit",
+                vin="VIN-101",
+            )
+        self.assertFalse(Asset.objects.filter(unique_identifier="ASSET 102").exists())
+
+    def test_explicit_asset_is_preserved(self):
+        asset = Asset.objects.create(
+            asset_type="vehicle", name="Existing vehicle", unique_identifier="ASSET EXISTING"
+        )
+        vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.CAR,
+            registration_number="ASSET 106",
+            make="Toyota",
+            model="Corolla",
+            asset=asset,
+        )
+        self.assertEqual(vehicle.asset_id, asset.pk)
+        self.assertEqual(Asset.objects.count(), 1)
+
+    def test_asset_name_respects_maximum_length(self):
+        vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.CAR,
+            registration_number="ASSET 103",
+            make="A" * 100,
+            model="B" * 100,
+        )
+        self.assertEqual(len(vehicle.asset.name), 100)
+
+    def test_api_links_existing_vehicle_asset_and_rejects_invalid_assets(self):
+        branch = Branch.objects.create(name="Asset branch", address="Harare")
+        staff_user = User.objects.create_user(username="asset-staff")
+        Staff.objects.create(user=staff_user, branch=branch, position="Manager")
+        client = APIClient()
+        client.force_authenticate(staff_user)
+        asset = Asset.objects.create(asset_type="vehicle", name="Vehicle", unique_identifier="ASSET 104")
+        equipment = Asset.objects.create(asset_type="equipment", name="Equipment", unique_identifier="ASSET 105")
+        data = {
+            "vehicle_type": "car",
+            "registration_number": "ASSET 104",
+            "make": "Toyota",
+            "model": "Corolla",
+            "asset": asset.id,
+        }
+
+        options = client.get("/api/vehicles/vehicles/available-assets/")
+        self.assertEqual(options.status_code, 200)
+        self.assertEqual([item["id"] for item in options.data], [asset.id])
+        missing = client.post("/api/vehicles/vehicles/", {key: value for key, value in data.items() if key != "asset"})
+        self.assertEqual(missing.status_code, 400)
+        self.assertIn("asset", missing.data)
+        invalid = client.post("/api/vehicles/vehicles/", {**data, "asset": equipment.id})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertFalse(Vehicle.objects.exists())
+        response = client.post("/api/vehicles/vehicles/", data)
+        self.assertEqual(response.status_code, 201)
+        vehicle = Vehicle.objects.get(pk=response.data["id"])
+        self.assertEqual(response.data["asset"], asset.id)
+        self.assertEqual(vehicle.asset_id, asset.id)
+        self.assertEqual(vehicle.asset.unique_identifier, "ASSET 104")
+        self.assertEqual(Asset.objects.count(), 2)
+        self.assertEqual(client.get("/api/vehicles/vehicles/available-assets/").data, [])
+        response = client.post("/api/vehicles/vehicles/", {**data, "registration_number": "OTHER"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("asset", response.data)
+        self.assertEqual(Vehicle.objects.count(), 1)
+        updated = client.patch(f"/api/vehicles/vehicles/{vehicle.id}/", {"make": "Honda"}, format="json")
+        self.assertEqual(updated.status_code, 200)
+        vehicle.refresh_from_db()
+        self.assertEqual(vehicle.asset_id, asset.id)
+        self.assertEqual(vehicle.make, "Honda")
 
 
 class VehicleAssignmentByVehicleTests(TestCase):
@@ -639,4 +744,3 @@ class VehicleAssignmentWriteTests(TestCase):
         self.client.force_authenticate(user=None)
         response = self.client.post("/api/vehicles/assignments/", {}, format="json")
         self.assertEqual(response.status_code, 401)
-

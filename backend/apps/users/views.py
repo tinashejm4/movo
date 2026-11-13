@@ -1,3 +1,4 @@
+from datetime import timedelta
 import secrets
 import requests, base64
 import logging
@@ -347,13 +348,17 @@ def request_otp(username):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    minutes_to_add = 15
+    expiry_time = timezone.now() + timedelta(minutes=minutes_to_add)
+
     # Generate a 6-digit OTP.
     otp_code = f"{secrets.randbelow(1_000_000):06d}"
 
-    # Create or update the OTP for the given username
-    otp, _created = OTP.objects.update_or_create(
+    # Keep earlier OTPs so any still-valid one can be used to log in
+    OTP.objects.create(
         username=normalize_zimbabwean_number(username),
-        defaults={"otp_code": otp_code},
+        otp_code=otp_code,
+        expiry_time=expiry_time,
     )
 
     if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
@@ -373,7 +378,7 @@ def request_otp(username):
 
     payload = {
         "destination": f"263{normalize_zimbabwean_number(username)}",
-        "text": f"Your Movo OTP is {otp_code}. It expires in 5 minutes.",
+        "text": f"Your Movo OTP is {otp_code}. It expires in {minutes_to_add} minutes.",
         "source": settings.TXTCONSOLE_SOURCE,
     }
 
@@ -457,14 +462,13 @@ class CustomerRegisterLoginView(APIView):
                 }
             )
 
-        try:
-            otp = OTP.objects.get(username=username, otp_code=otp_code)
-        except OTP.DoesNotExist:
+        matching_otps = OTP.objects.filter(username=username, otp_code=otp_code)
+        if not matching_otps.exists():
             return Response(
                 {"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        if timezone.now() > otp.expiry_time:
+        if not matching_otps.filter(expiry_time__gte=timezone.now()).exists():
             return Response(
                 {"error": "OTP has expired"}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -487,11 +491,12 @@ class CustomerRegisterLoginView(APIView):
                 }
             )
 
+        o
+
         user = User.objects.create_user(
             username=username, password=CUSTOMER_DEFAULT_PASSWORD
         )
         Customer.objects.create(user=user)
-        otp.delete()
 
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)

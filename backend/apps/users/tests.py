@@ -151,10 +151,10 @@ class CustomerOtpAuthTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        otp = OTP.objects.get(username=phone_number)
+        otp = OTP.objects.get(username=phone_number, otp_code=response.data["otp"])
         self.assertEqual(len(response.data["otp"]), 6)
-        self.assertEqual(otp.otp_code, response.data["otp"])
         self.assertGreater(otp.expiry_time, timezone.now())
+        self.assertEqual(OTP.objects.filter(username=phone_number).count(), 2)
 
     def test_customer_register_with_valid_otp_returns_tokens(self):
         phone_number = "0777654321"
@@ -180,7 +180,7 @@ class CustomerOtpAuthTests(APITestCase):
         self.assertTrue(
             Contact.objects.filter(user=user, phone_number=phone_number).exists()
         )
-        self.assertFalse(OTP.objects.filter(username=phone_number).exists())
+        self.assertTrue(OTP.objects.filter(username=phone_number).exists())
 
     def test_customer_login_with_valid_otp_returns_tokens(self):
         phone_number = "0770000000"

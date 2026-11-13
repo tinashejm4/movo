@@ -26,20 +26,24 @@ from apps.adminportal.views.customer_views import (
     CustomersMetricsView
 )
 
-from apps.adminportal.views.accounts import (
+from apps.adminportal.views.accounts_views import (
     AccountsListView,
     AccountTransactionsView,
     CreateFundsTransferView,
+    ListExpensesView,
     ReceiptImageView,
+    ExpenseReceiptView,
     ExpenseReversalView,
     ChargeReversalView,
     FundsTransferReversalView,
     CreateExpenseView,
+    BulkExpensesView,
     ExpenseClassView,
     CreateChargeView
 )
 
 from .views.delivery_order_views import DeliveryPageView
+from .views.asset_views import AssetImageContentView, AssetImagesView, AssetsView
 from .views.driver_shift_views import WeeklyShiftsView, WeeklyShiftDetailView, DriverExceptionsView, DriverExceptionDetailView, DriverShiftReminderView, DriverShiftExceptionOverviewView
 from .views.handover_review_views import HandoverReviewListView, HandoverReviewResolveView
 from .views.refund_review_views import RefundReviewListView, RefundReviewResolveView
@@ -78,13 +82,19 @@ urlpatterns = [
     path("customers/", CustomersListView.as_view(), name="customers_list_view"),
     path("customers/<int:pk>/", CustomersDetailView.as_view(), name="customers_detail_view"),
     path("accounts/", AccountsListView.as_view(), name="accounts_list_view"),
+    path("assets/", AssetsView.as_view(), name="admin_assets"),
+    path("assets/<int:asset_id>/images/", AssetImagesView.as_view(), name="admin_asset_images"),
+    path("assets/<int:asset_id>/images/<int:image_id>/", AssetImageContentView.as_view(), name="admin_asset_image"),
     path("accounts/expense-classes/", ExpenseClassView.as_view(), name="expense_class_view"),
     path("accounts/create-expense/", CreateExpenseView.as_view(), name="create_expense_view"),
     path("accounts/create-charge/", CreateChargeView.as_view(), name="create_charge_view"),
     path("accounts/create-funds-transfer/", CreateFundsTransferView.as_view(), name="create_funds_transfer_view"),
     path("accounts/<int:account_id>/transactions/", AccountTransactionsView.as_view(), name="account_transactions_view"),
     path("accounts/<int:account_id>/receipt-image/", ReceiptImageView.as_view(), name="receipt_image_view"),
+    path("accounts/<int:account_id>/expenses/<int:expense_id>/receipt/", ExpenseReceiptView.as_view(), name="expense_receipt_view"),
     path("accounts/<int:account_id>/expense-reversal/", ExpenseReversalView.as_view(), name="expense_reversal_view"),
     path("accounts/<int:account_id>/charge-reversal/", ChargeReversalView.as_view(), name="charge_reversal_view"),
     path("accounts/<int:account_id>/funds-transfer-reversal/", FundsTransferReversalView.as_view(), name="funds_transfer_reversal_view"),
+    path("accounts/<int:account_id>/list-expenses/", ListExpensesView.as_view(), name="list_expenses_view"),
+    path("accounts/<int:account_id>/bulk-expenses/", BulkExpensesView.as_view(), name="bulk_expenses_view"),
 ]

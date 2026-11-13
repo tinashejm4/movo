@@ -44,11 +44,18 @@ DEBUG = os.environ.get("DEBUG", "1") == "1"
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0").split(
+    for host in os.environ.get("HOSTNAME", "localhost,127.0.0.1,0.0.0.0").split(
         ","
     )
     if host.strip()
 ]
+
+# HOSTNAME is often set by the OS/container to the machine name, so always
+# allow local hosts during development.
+if DEBUG:
+    ALLOWED_HOSTS += [
+        h for h in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]") if h not in ALLOWED_HOSTS
+    ]
 
 
 # Application definition
@@ -97,9 +104,9 @@ MIDDLEWARE = [
 
 ASGI_APPLICATION = "Movo.asgi.application"
 
+
 CSRF_TRUSTED_ORIGINS = [
-    "https://movo-backend-935754022035.europe-west1.run.app",
-    "https://test-movo-backend-935754022035.europe-west1.run.app",
+    f"https://{os.environ.get('HOSTNAME', '')}",
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -107,8 +114,7 @@ CSRF_TRUSTED_ORIGINS = [
     ]
 
 CORS_ALLOWED_ORIGINS = [
-    "https://movo-backend-935754022035.europe-west1.run.app",
-    "https://test-movo-backend-935754022035.europe-west1.run.app",
+    f"https://{os.environ.get('HOSTNAME', '')}",    
     "https://movo.co.zw",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
