@@ -11,14 +11,43 @@ class Migration(migrations.Migration):
         ('vehicles', '0003_alter_vehicleassignment_handover_notes'),
     ]
 
+    # Idempotent: the column/constraint may already exist from a partial or manual apply.
     operations = [
-        migrations.AddField(
-            model_name='vehicle',
-            name='asset',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='fleet_vehicles', to='bookkeeping.asset'),
-        ),
-        migrations.AddConstraint(
-            model_name='vehicle',
-            constraint=models.UniqueConstraint(fields=('asset',), name='vehicles_unique_asset'),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name='vehicle',
+                    name='asset',
+                    field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='fleet_vehicles', to='bookkeeping.asset'),
+                ),
+                migrations.AddConstraint(
+                    model_name='vehicle',
+                    constraint=models.UniqueConstraint(fields=('asset',), name='vehicles_unique_asset'),
+                ),
+            ],
+            database_operations=[
+                migrations.RunSQL(
+                    sql=[
+                        "ALTER TABLE vehicles_vehicle ADD COLUMN IF NOT EXISTS asset_id bigint NULL;",
+                        "CREATE INDEX IF NOT EXISTS vehicles_vehicle_asset_id_idx ON vehicles_vehicle (asset_id);",
+                        """
+                        DO $$ BEGIN
+                            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vehicles_vehicle_asset_id_fk') THEN
+                                ALTER TABLE vehicles_vehicle ADD CONSTRAINT vehicles_vehicle_asset_id_fk
+                                    FOREIGN KEY (asset_id) REFERENCES bookkeeping_asset (id)
+                                    DEFERRABLE INITIALLY DEFERRED;
+                            END IF;
+                            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vehicles_unique_asset') THEN
+                                ALTER TABLE vehicles_vehicle ADD CONSTRAINT vehicles_unique_asset UNIQUE (asset_id);
+                            END IF;
+                        END $$;
+                        """,
+                    ],
+                    reverse_sql=[
+                        "ALTER TABLE vehicles_vehicle DROP CONSTRAINT IF EXISTS vehicles_unique_asset;",
+                        "ALTER TABLE vehicles_vehicle DROP COLUMN IF EXISTS asset_id;",
+                    ],
+                ),
+            ],
         ),
     ]
