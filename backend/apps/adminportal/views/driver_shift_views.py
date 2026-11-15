@@ -19,67 +19,15 @@ from apps.transporters.models import (
     DriverShiftReminderSetting,
     WeeklyDriverShift,
 )
-from apps.transporters.shift_service import reconcile_all_drivers, reconcile_driver
+from apps.transporters.shift_service import (
+    effective_shift,
+    reconcile_all_drivers,
+    reconcile_driver,
+    shift_allows_work,
+)
 from apps.users.models import Biker
 from apps.users.permissions import IsStaff
-
-
-class ShiftFieldsSerializer(serializers.Serializer):
-    is_open = serializers.BooleanField()
-    start_time = serializers.TimeField(allow_null=True, required=False)
-    end_time = serializers.TimeField(allow_null=True, required=False)
-
-    def validate(self, attrs):
-        opened = attrs['is_open']
-        start = attrs.get('start_time')
-        end = attrs.get('end_time')
-        if opened and (start is None or end is None or start >= end):
-            raise serializers.ValidationError('Open shifts require start_time before end_time.')
-        if not opened and (start is not None or end is not None):
-            raise serializers.ValidationError('Closed shifts must have null start_time and end_time.')
-        return attrs
-
-
-class ExceptionSerializer(ShiftFieldsSerializer):
-    date = serializers.DateField()
-
-
-class ReminderSettingSerializer(serializers.Serializer):
-    minutes_before_close = serializers.IntegerField(
-        min_value=1,
-        max_value=120,
-        help_text="Minutes before the effective shift end when the warning is sent.",
-    )
-
-
-class WeeklyShiftResponseSerializer(ShiftFieldsSerializer):
-    weekday = serializers.IntegerField(
-        min_value=0,
-        max_value=6,
-        help_text="Day of week where Monday is 0 and Sunday is 6.",
-    )
-
-
-class DetailResponseSerializer(serializers.Serializer):
-    detail = serializers.CharField()
-    code = serializers.CharField(required=False)
-
-
-class DriverShiftValidationErrorSerializer(serializers.Serializer):
-    minutes_before_close = serializers.ListField(
-        child=serializers.CharField(),
-        required=False,
-    )
-    is_open = serializers.ListField(child=serializers.CharField(), required=False)
-    start_time = serializers.ListField(child=serializers.CharField(), required=False)
-    end_time = serializers.ListField(child=serializers.CharField(), required=False)
-    date = serializers.ListField(child=serializers.CharField(), required=False)
-    non_field_errors = serializers.ListField(
-        child=serializers.CharField(),
-        required=False,
-    )
-    detail = serializers.CharField(required=False)
-
+from ..serializers import *
 
 AUTH_ERROR_RESPONSES = {
     401: OpenApiResponse(
@@ -128,7 +76,7 @@ class DriverShiftReminderView(APIView):
     )
     def get(self, request):
         setting, _ = DriverShiftReminderSetting.objects.get_or_create(pk=1)
-        return Response({'minutes_before_close': setting.minutes_before_close})
+        return Response({"minutes_before_close": setting.minutes_before_close})
 
     @extend_schema(
         tags=["Admin/Driver Shifts"],
@@ -147,16 +95,55 @@ class DriverShiftReminderView(APIView):
         serializer = ReminderSettingSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         setting, _ = DriverShiftReminderSetting.objects.get_or_create(pk=1)
-        setting.minutes_before_close = serializer.validated_data['minutes_before_close']
-        setting.save(update_fields=['minutes_before_close'])
-        return Response({'minutes_before_close': setting.minutes_before_close})
+        setting.minutes_before_close = serializer.validated_data["minutes_before_close"]
+        setting.save(update_fields=["minutes_before_close"])
+        return Response({"minutes_before_close": setting.minutes_before_close})
+
+
+class DriverShiftCheckView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Admin/Driver Shifts"],
+        summary="Check whether the requesting driver is within their shift",
+        responses={
+            200: DriverShiftCheckResponseSerializer,
+            404: OpenApiResponse(
+                DetailResponseSerializer,
+                description="The authenticated user does not have a driver profile.",
+            ),
+            401: AUTH_ERROR_RESPONSES[401],
+        },
+    )
+    def get(self, request):
+        biker = get_object_or_404(Biker, user=request.user)
+        now = timezone.now()
+        local_now = timezone.localtime(now)
+        shift = effective_shift(biker, timezone.localdate(now))
+
+        if shift_allows_work(shift, now):
+            shift_status = "active"
+        elif (
+            shift["is_open"]
+            and local_now.time().replace(tzinfo=None) < shift["start_time"]
+        ):
+            shift_status = "not_started"
+        else:
+            shift_status = "ended"
+
+        return Response(
+            {
+                "in_bounds": shift_status == "active",
+                "status": shift_status,
+            }
+        )
 
 
 def shift_payload(shift):
     return {
-        'is_open': shift.is_open,
-        'start_time': shift.start_time,
-        'end_time': shift.end_time,
+        "is_open": shift.is_open,
+        "start_time": shift.start_time,
+        "end_time": shift.end_time,
     }
 
 
@@ -172,10 +159,12 @@ class WeeklyShiftsView(APIView):
         },
     )
     def get(self, request):
-        return Response([
-            {'weekday': shift.weekday, **shift_payload(shift)}
-            for shift in WeeklyDriverShift.objects.order_by('weekday')
-        ])
+        return Response(
+            [
+                {"weekday": shift.weekday, **shift_payload(shift)}
+                for shift in WeeklyDriverShift.objects.order_by("weekday")
+            ]
+        )
 
 
 class WeeklyShiftDetailView(APIView):
@@ -210,7 +199,7 @@ class WeeklyShiftDetailView(APIView):
         shift.save()
         if timezone.localdate().weekday() == weekday:
             reconcile_all_drivers()
-        return Response({'weekday': weekday, **shift_payload(shift)})
+        return Response({"weekday": weekday, **shift_payload(shift)})
 
 
 class DriverShiftExceptionOverviewSerializer(ShiftFieldsSerializer):
@@ -225,20 +214,27 @@ class DriverShiftExceptionOverviewView(APIView):
     @extend_schema(
         tags=["Admin/Driver Shifts"],
         summary="List shift exceptions across all drivers",
-        responses={200: DriverShiftExceptionOverviewSerializer(many=True), **AUTH_ERROR_RESPONSES},
+        responses={
+            200: DriverShiftExceptionOverviewSerializer(many=True),
+            **AUTH_ERROR_RESPONSES,
+        },
     )
     def get(self, request):
-        exceptions = DriverShiftException.objects.select_related("biker__user").order_by("date", "biker__user__first_name", "biker__user__last_name")
+        exceptions = DriverShiftException.objects.select_related(
+            "biker__user"
+        ).order_by("date", "biker__user__first_name", "biker__user__last_name")
         results = []
         for exception in exceptions:
             user = exception.biker.user
             name = user.get_full_name().strip() or user.username
-            results.append({
-                "biker_user_id": user.pk,
-                "biker_name": name,
-                "date": exception.date,
-                **shift_payload(exception),
-            })
+            results.append(
+                {
+                    "biker_user_id": user.pk,
+                    "biker_name": name,
+                    "date": exception.date,
+                    **shift_payload(exception),
+                }
+            )
         return Response(results)
 
 
@@ -264,10 +260,12 @@ class DriverExceptionsView(APIView):
     )
     def get(self, request, biker_user_id):
         biker = self.biker(biker_user_id)
-        return Response([
-            {'date': exception.date, **shift_payload(exception)}
-            for exception in biker.shift_exceptions.order_by('date')
-        ])
+        return Response(
+            [
+                {"date": exception.date, **shift_payload(exception)}
+                for exception in biker.shift_exceptions.order_by("date")
+            ]
+        )
 
     @extend_schema(
         tags=["Admin/Driver Shifts"],
@@ -292,12 +290,18 @@ class DriverExceptionsView(APIView):
         serializer = ExceptionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        if DriverShiftException.objects.filter(biker=biker, date=data['date']).exists():
-            return Response({'detail': 'An exception already exists for this date.'}, status=status.HTTP_400_BAD_REQUEST)
+        if DriverShiftException.objects.filter(biker=biker, date=data["date"]).exists():
+            return Response(
+                {"detail": "An exception already exists for this date."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         exception = DriverShiftException.objects.create(biker=biker, **data)
         if exception.date == timezone.localdate():
             reconcile_driver(biker)
-        return Response({'date': exception.date, **shift_payload(exception)}, status=status.HTTP_201_CREATED)
+        return Response(
+            {"date": exception.date, **shift_payload(exception)},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class DriverExceptionDetailView(APIView):
@@ -308,8 +312,10 @@ class DriverExceptionDetailView(APIView):
         try:
             parsed_day = date.fromisoformat(day)
         except ValueError:
-            raise Http404('Invalid date')
-        return get_object_or_404(DriverShiftException, biker__user_id=biker_user_id, date=parsed_day)
+            raise Http404("Invalid date")
+        return get_object_or_404(
+            DriverShiftException, biker__user_id=biker_user_id, date=parsed_day
+        )
 
     @extend_schema(
         tags=["Admin/Driver Shifts"],
@@ -340,7 +346,7 @@ class DriverExceptionDetailView(APIView):
         exception.save()
         if exception.date == timezone.localdate():
             reconcile_driver(exception.biker)
-        return Response({'date': day, **shift_payload(exception)})
+        return Response({"date": day, **shift_payload(exception)})
 
     @extend_schema(
         tags=["Admin/Driver Shifts"],
