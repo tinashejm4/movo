@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from rest_framework import serializers
 
 from apps.bookkeeping.models import Asset
@@ -197,6 +198,30 @@ class MileageRecordSerializer(serializers.ModelSerializer):
         if obj.recorded_by is None:
             return None
         return obj.recorded_by.get_full_name().strip() or obj.recorded_by.get_username()
+
+    def validate(self, attrs):
+        vehicle = attrs.get("vehicle", getattr(self.instance, "vehicle", None))
+        recorded_at = attrs.get("recorded_at", getattr(self.instance, "recorded_at", None))
+        odometer_km = attrs.get("odometer_km", getattr(self.instance, "odometer_km", None))
+
+        if vehicle is not None and recorded_at is not None and odometer_km is not None:
+            if self.instance is None:
+                previous_records = MileageRecord.objects.filter(
+                    vehicle=vehicle,
+                    recorded_at__lte=recorded_at,
+                )
+            else:
+                previous_records = MileageRecord.objects.filter(vehicle=vehicle).filter(
+                    Q(recorded_at__lt=recorded_at)
+                    | Q(recorded_at=recorded_at, pk__lt=self.instance.pk)
+                )
+            previous = previous_records.order_by("-recorded_at", "-pk").first()
+            if previous is not None and odometer_km < previous.odometer_km:
+                raise serializers.ValidationError({
+                    "odometer_km": f"Mileage cannot be lower than the previous reading ({previous.odometer_km} km)."
+                })
+
+        return attrs
 
     class Meta:
         model = MileageRecord

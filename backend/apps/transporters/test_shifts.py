@@ -44,6 +44,49 @@ class DriverShiftTests(APITestCase):
         self.assertEqual(effective_shift(self.biker, tomorrow)['end_time'], time(13))
         self.assertEqual(effective_shift(self.biker, tomorrow + timedelta(days=7))['is_open'], False)
 
+    def test_driver_shift_check_reports_current_shift_bounds(self):
+        url = reverse('driver_shift_check')
+        self.client.force_authenticate(user=self.driver_user)
+
+        self.set_time(7, 59)
+        self.assertEqual(self.client.get(url).data, {'in_bounds': False, 'status': 'not_started'})
+        self.set_time(8)
+        self.assertEqual(self.client.get(url).data, {'in_bounds': True, 'status': 'active'})
+        self.set_time(16, 59)
+        self.assertEqual(self.client.get(url).data, {'in_bounds': True, 'status': 'active'})
+        self.set_time(17)
+        self.assertEqual(self.client.get(url).data, {'in_bounds': False, 'status': 'ended'})
+
+    def test_driver_shift_check_uses_effective_exception_and_closed_day(self):
+        url = reverse('driver_shift_check')
+        self.client.force_authenticate(user=self.driver_user)
+        DriverShiftException.objects.create(
+            biker=self.biker,
+            date=self.now.date(),
+            is_open=True,
+            start_time=time(9),
+            end_time=time(11),
+        )
+        self.set_time(8, 30)
+        self.assertEqual(self.client.get(url).data, {'in_bounds': False, 'status': 'not_started'})
+        self.set_time(10)
+        self.assertEqual(self.client.get(url).data, {'in_bounds': True, 'status': 'active'})
+
+        DriverShiftException.objects.filter(biker=self.biker).update(
+            is_open=False,
+            start_time=None,
+            end_time=None,
+        )
+        self.assertEqual(self.client.get(url).data, {'in_bounds': False, 'status': 'ended'})
+
+    def test_driver_shift_check_requires_driver_and_authentication(self):
+        url = reverse('driver_shift_check')
+        self.assertEqual(self.client.get(url).status_code, 401)
+
+        non_driver = User.objects.create_user(username='shift-non-driver')
+        self.client.force_authenticate(user=non_driver)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
     def test_activation_boundaries_and_interval_history(self):
         self.client.force_authenticate(user=self.driver_user)
         self.set_time(7, 59)
