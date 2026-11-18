@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
@@ -6,9 +7,149 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.bookkeeping.models import Asset
+from apps.bookkeeping.models import Account, Asset, Expense, ExpenseAccount, GeneralExpense, LedgerEntry
 from apps.users.models import Biker, Branch, Staff
-from .models import InsurancePolicy, LicensingRecord, MileageRecord, ServiceRecord, Vehicle, VehicleAssignment
+from .models import FuelRecord, InsurancePolicy, LicensingRecord, MileageRecord, ServiceRecord, Vehicle, VehicleAssignment
+
+
+class FuelExpenseCreationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.branch = Branch.objects.create(name="Fuel branch", address="Harare")
+        self.staff_user = User.objects.create_user(
+            username="fuel-staff", password="test", first_name="Tendai", last_name="Manager"
+        )
+        Staff.objects.create(user=self.staff_user, branch=self.branch, position="Manager")
+        self.driver_user = User.objects.create_user(
+            username="trevor", first_name="Trevor", last_name="Moyo"
+        )
+        self.driver = Biker.objects.create(user=self.driver_user, branch=self.branch)
+        self.vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.MOTORCYCLE,
+            registration_number="AFY-6897",
+            make="Honda",
+            model="XR150",
+        )
+        self.account = Account.objects.create(name="Fuel account", currency="USD")
+        self.expense_type = ExpenseAccount.objects.create(name="Fuel")
+        self.client.force_authenticate(self.staff_user)
+
+    def payload(self, **overrides):
+        return {
+            "recorded_at": timezone.now().isoformat(),
+            "quantity_litres": "10.000",
+            "odometer_km": 12345,
+            "notes": "Full tank",
+            "vehicle": self.vehicle.pk,
+            "driver": self.driver.pk,
+            "account_id": self.account.pk,
+            "expense_type_id": self.expense_type.pk,
+            "total_cost": "63.00",
+            "station": "City Garage",
+            **overrides,
+        }
+
+    def test_post_creates_fuel_and_general_expense_atomically(self):
+        request_started_at = timezone.now()
+        response = self.client.post("/api/vehicles/fuel-records/", self.payload(), format="json")
+        request_finished_at = timezone.now()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        fuel = FuelRecord.objects.get(pk=response.data["id"])
+        expense = Expense.objects.get(pk=response.data["expense"])
+        self.assertEqual(fuel.expense_id, expense.pk)
+        self.assertEqual(expense.account_id, self.account.pk)
+        self.assertEqual(expense.expense_type_id, self.expense_type.pk)
+        self.assertEqual(expense.amount, 63.0)
+        self.assertEqual(expense.supplier, "City Garage")
+        self.assertEqual(expense.description, "Fuel 10 litres in AFY-6897 by Trevor Moyo")
+        self.assertEqual(expense.added_by_id, self.staff_user.pk)
+        self.assertEqual(GeneralExpense.objects.get(expense=expense).added_by_id, self.staff_user.pk)
+        self.assertEqual(LedgerEntry.objects.count(), 1)
+        self.assertGreaterEqual(expense.actual_date, request_started_at)
+        self.assertLessEqual(expense.actual_date, request_finished_at)
+
+    def test_post_accepts_expense_actual_date_override(self):
+        actual_date = timezone.now() - timedelta(days=3)
+        response = self.client.post(
+            "/api/vehicles/fuel-records/",
+            self.payload(actual_date=actual_date.isoformat()),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        expense = Expense.objects.get(pk=response.data["expense"])
+        self.assertEqual(expense.actual_date, actual_date)
+
+    def test_failed_general_expense_creation_rolls_back_entire_fuel_post(self):
+        with patch("apps.vehicles.serializers.GeneralExpense.objects.create", side_effect=RuntimeError("failed")):
+            with self.assertRaises(RuntimeError):
+                self.client.post("/api/vehicles/fuel-records/", self.payload(), format="json")
+
+        self.assertEqual(FuelRecord.objects.count(), 0)
+        self.assertEqual(Expense.objects.count(), 0)
+        self.assertEqual(LedgerEntry.objects.count(), 0)
+        self.assertEqual(GeneralExpense.objects.count(), 0)
+
+    def test_invalid_financial_input_creates_no_records(self):
+        for invalid_fields in (
+            {"account_id": 999999},
+            {"expense_type_id": 999999},
+            {"total_cost": "0"},
+        ):
+            with self.subTest(invalid_fields=invalid_fields):
+                response = self.client.post(
+                    "/api/vehicles/fuel-records/",
+                    self.payload(**invalid_fields),
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(FuelRecord.objects.count(), 0)
+                self.assertEqual(Expense.objects.count(), 0)
+                self.assertEqual(LedgerEntry.objects.count(), 0)
+
+    def test_historical_fuel_record_without_expense_remains_readable(self):
+        fuel = FuelRecord.objects.create(
+            vehicle=self.vehicle,
+            driver=self.driver,
+            recorded_at=timezone.now(),
+            quantity_litres="8.500",
+        )
+
+        response = self.client.get(f"/api/vehicles/fuel-records/{fuel.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["expense"])
+
+    def test_list_can_filter_fuel_records_by_vehicle_id(self):
+        first = FuelRecord.objects.create(
+            vehicle=self.vehicle,
+            recorded_at=timezone.now(),
+            quantity_litres="8.500",
+        )
+        other_vehicle = Vehicle.objects.create(
+            vehicle_type=Vehicle.Type.CAR,
+            registration_number="FUEL 200",
+            make="Toyota",
+            model="Corolla",
+        )
+        FuelRecord.objects.create(
+            vehicle=other_vehicle,
+            recorded_at=timezone.now(),
+            quantity_litres="12.000",
+        )
+
+        response = self.client.get("/api/vehicles/fuel-records/", {"vehicle_id": self.vehicle.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [first.pk])
+
+    def test_list_rejects_invalid_vehicle_id_filter(self):
+        response = self.client.get("/api/vehicles/fuel-records/", {"vehicle_id": "0"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("vehicle_id", response.data)
 
 
 class VehicleAssetTests(TestCase):

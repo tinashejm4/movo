@@ -175,6 +175,13 @@ class VehicleAssignment(models.Model):
 
 
 class FuelRecord(models.Model):
+    expense = models.OneToOneField(
+        "bookkeeping.Expense",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fuel_record",
+    )
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="fuel_records")
     driver = models.ForeignKey(
         "users.Biker",
@@ -185,11 +192,7 @@ class FuelRecord(models.Model):
     )
     recorded_at = models.DateTimeField()
     quantity_litres = models.DecimalField(max_digits=9, decimal_places=3)
-    total_cost = models.DecimalField(max_digits=12, decimal_places=2)
-    currency = models.CharField(max_length=3, default="USD")
     odometer_km = models.PositiveBigIntegerField(null=True, blank=True)
-    station = models.CharField(max_length=150, blank=True)
-    receipt_reference = models.CharField(max_length=100, blank=True)
     recorded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
