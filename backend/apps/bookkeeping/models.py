@@ -5,6 +5,7 @@ import uuid
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models, transaction
+from django.utils import timezone
 from apps.users.models import Branch
 from django.contrib.auth.models import User
 
@@ -207,7 +208,11 @@ class Expense(models.Model):
     supplier = models.CharField(max_length = 100, blank = True, null = True)
     import_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     description = models.TextField(blank = True, null = True)
+<<<<<<< HEAD
     actual_date = models.DateTimeField()
+=======
+    actual_date = models.DateTimeField(default=timezone.now)
+>>>>>>> 011b360c8f56c36597325b87cf661ff870e596db
     is_reversed = models.BooleanField(default=False)
     reversed_at = models.DateTimeField(blank=True, null=True)
     reversed_by = models.ForeignKey(
