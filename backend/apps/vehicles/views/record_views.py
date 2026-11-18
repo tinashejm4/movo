@@ -50,8 +50,26 @@ class MileageRecordViewSet(RecordedByViewSet):
 class FuelRecordViewSet(RecordedByViewSet):
     serializer_class = FuelRecordSerializer
 
+    @extend_schema(parameters=[
+        OpenApiParameter(
+            name="vehicle_id",
+            type=int,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description="Filter fuel records to a vehicle ID.",
+        ),
+    ])
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
     def get_queryset(self):
-        return FuelRecord.objects.select_related("vehicle", "driver__user", "recorded_by")
+        vehicle_id = self.request.query_params.get("vehicle_id")
+        queryset = FuelRecord.objects.select_related("vehicle", "driver__user", "recorded_by", "expense")
+        if vehicle_id is not None:
+            if not vehicle_id.isdecimal() or int(vehicle_id) < 1:
+                raise serializers.ValidationError({"vehicle_id": "Enter a positive vehicle ID."})
+            queryset = queryset.filter(vehicle_id=int(vehicle_id))
+        return queryset
 
 
 class ServiceRecordViewSet(RecordedByViewSet):

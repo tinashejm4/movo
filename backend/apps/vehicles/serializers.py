@@ -1,9 +1,10 @@
+from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import serializers
 
-from apps.bookkeeping.models import Asset
+from apps.bookkeeping.models import Account, Asset, Expense, ExpenseAccount, GeneralExpense
 from apps.users.models import Biker
 
 from .models import (
@@ -244,10 +245,77 @@ class MileageRecordSerializer(serializers.ModelSerializer):
 
 
 class FuelRecordSerializer(serializers.ModelSerializer):
+    account_id = serializers.PrimaryKeyRelatedField(
+        source="account", queryset=Account.objects.all(), write_only=True
+    )
+    expense_type_id = serializers.PrimaryKeyRelatedField(
+        source="expense_type", queryset=ExpenseAccount.objects.all(), write_only=True
+    )
+    total_cost = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal("0.01"), write_only=True
+    )
+    station = serializers.CharField(max_length=100, allow_blank=True, required=False, write_only=True)
+    actual_date = serializers.DateTimeField(required=False, allow_null=True, write_only=True)
+    expense = serializers.PrimaryKeyRelatedField(read_only=True, allow_null=True)
+
+    def validate(self, attrs):
+        if self.instance is None:
+            missing = [field for field in ("account", "expense_type", "total_cost") if field not in attrs]
+            if missing:
+                raise serializers.ValidationError({
+                    {"account": "account_id", "expense_type": "expense_type_id", "total_cost": "total_cost"}[field]: "This field is required."
+                    for field in missing
+                })
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        account = validated_data.pop("account")
+        expense_type = validated_data.pop("expense_type")
+        amount = validated_data.pop("total_cost")
+        supplier = validated_data.pop("station", "")
+        expense_date = validated_data.pop("actual_date", None)
+        recorded_by = validated_data.get("recorded_by")
+
+        fuel_record = FuelRecord.objects.create(**validated_data)
+        vehicle = fuel_record.vehicle
+        driver_name = (
+            fuel_record.driver.user.get_full_name().strip()
+            if fuel_record.driver_id else "Unknown driver"
+        ) or (fuel_record.driver.user.get_username() if fuel_record.driver_id else "Unknown driver")
+        litres = format(fuel_record.quantity_litres.normalize(), "f")
+        description = f"Fuel {litres} litres in {vehicle.registration_number} by {driver_name}"
+        expense_fields = {
+            "account": account,
+            "expense_type": expense_type,
+            "amount": amount,
+            "supplier": supplier,
+            "description": description,
+            "added_by": recorded_by,
+        }
+        if expense_date is not None:
+            expense_fields["actual_date"] = expense_date
+        expense = Expense.objects.create(**expense_fields)
+        GeneralExpense.objects.create(expense=expense, added_by=recorded_by)
+        fuel_record.expense = expense
+        fuel_record.save(update_fields=("expense",))
+        return fuel_record
+
+    def update(self, instance, validated_data):
+        # Financial fields are immutable through fuel-record updates; changes
+        # to the ledger-backed expense belong in the bookkeeping workflow.
+        for field in ("account", "expense_type", "total_cost", "station", "actual_date"):
+            validated_data.pop(field, None)
+        return super().update(instance, validated_data)
+
     class Meta:
         model = FuelRecord
-        fields = "__all__"
-        read_only_fields = ("recorded_by", "created_at")
+        fields = (
+            "id", "expense", "vehicle", "driver", "recorded_at", "quantity_litres",
+            "odometer_km", "notes", "recorded_by", "created_at", "account_id",
+            "expense_type_id", "total_cost", "station", "actual_date",
+        )
+        read_only_fields = ("recorded_by", "created_at", "expense")
 
 
 class ServiceRecordSerializer(serializers.ModelSerializer):
