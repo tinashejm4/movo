@@ -280,6 +280,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.transporters.tasks.clock_out_finished_shifts',
         'schedule': 60.0,
     },
+    'refresh-fuel-prices-daily': {
+        'task': 'apps.vehicles.tasks.refresh_fuel_prices_task',
+        'schedule': crontab(minute=0, hour=6),
+    },
 }
 
 parsed_channel_redis = urlparse(CHANNEL_REDIS_URL)

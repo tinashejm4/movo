@@ -175,6 +175,10 @@ class VehicleAssignment(models.Model):
 
 
 class FuelRecord(models.Model):
+    class FuelType(models.TextChoices):
+        PETROL = "petrol", "Petrol"
+        DIESEL = "diesel", "Diesel"
+
     expense = models.OneToOneField(
         "bookkeeping.Expense",
         on_delete=models.SET_NULL,
@@ -183,6 +187,10 @@ class FuelRecord(models.Model):
         related_name="fuel_record",
     )
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="fuel_records")
+    fuel_type = models.CharField(max_length=10, choices=FuelType.choices, default=FuelType.PETROL)
+    fuel_price = models.ForeignKey(
+        "FuelPrice", on_delete=models.PROTECT, null=True, blank=True, related_name="fuel_records"
+    )
     driver = models.ForeignKey(
         "users.Biker",
         on_delete=models.SET_NULL,
@@ -208,6 +216,26 @@ class FuelRecord(models.Model):
 
     def __str__(self):
         return f"{self.vehicle.registration_number}: {self.quantity_litres} L"
+
+
+class FuelPrice(models.Model):
+    class Currency(models.TextChoices):
+        USD = "USD", "USD"
+        ZWG = "ZWG", "ZWG"
+
+    fuel_type = models.CharField(max_length=10, choices=FuelRecord.FuelType.choices)
+    currency = models.CharField(max_length=3, choices=Currency.choices)
+    price_per_litre = models.DecimalField(max_digits=10, decimal_places=4)
+    effective_date = models.DateField()
+    source = models.URLField(default="https://www.zera.co.zw/")
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["effective_date", "fetched_at", "id"]
+        indexes = [models.Index(fields=["fuel_type", "currency", "-effective_date"])]
+
+    def __str__(self):
+        return f"{self.get_fuel_type_display()} {self.price_per_litre} {self.currency}/L"
 
 
 class ServiceRecord(models.Model):

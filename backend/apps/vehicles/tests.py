@@ -1,4 +1,6 @@
 from datetime import timedelta
+from decimal import Decimal
+from unittest.mock import Mock
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -9,7 +11,8 @@ from rest_framework.test import APIClient
 
 from apps.bookkeeping.models import Account, Asset, Expense, ExpenseAccount, GeneralExpense, LedgerEntry
 from apps.users.models import Biker, Branch, Staff
-from .models import FuelRecord, InsurancePolicy, LicensingRecord, MileageRecord, ServiceRecord, Vehicle, VehicleAssignment
+from .models import FuelPrice, FuelRecord, InsurancePolicy, LicensingRecord, MileageRecord, ServiceRecord, Vehicle, VehicleAssignment
+from .fuel_prices import refresh_fuel_prices, scrape_zera_prices
 
 
 class FuelExpenseCreationTests(TestCase):
@@ -32,18 +35,23 @@ class FuelExpenseCreationTests(TestCase):
         )
         self.account = Account.objects.create(name="Fuel account", currency="USD")
         self.expense_type = ExpenseAccount.objects.create(name="Fuel")
+        self.fuel_price = FuelPrice.objects.create(
+            fuel_type=FuelRecord.FuelType.PETROL,
+            currency=FuelPrice.Currency.USD,
+            price_per_litre="6.3000",
+            effective_date=timezone.localdate(),
+        )
         self.client.force_authenticate(self.staff_user)
 
     def payload(self, **overrides):
         return {
             "recorded_at": timezone.now().isoformat(),
-            "quantity_litres": "10.000",
             "odometer_km": 12345,
             "notes": "Full tank",
             "vehicle": self.vehicle.pk,
             "driver": self.driver.pk,
             "account_id": self.account.pk,
-            "expense_type_id": self.expense_type.pk,
+            "fuel_type": "petrol",
             "total_cost": "63.00",
             "station": "City Garage",
             **overrides,
@@ -61,6 +69,8 @@ class FuelExpenseCreationTests(TestCase):
         self.assertEqual(expense.account_id, self.account.pk)
         self.assertEqual(expense.expense_type_id, self.expense_type.pk)
         self.assertEqual(expense.amount, 63.0)
+        self.assertEqual(fuel.quantity_litres, 10)
+        self.assertEqual(fuel.fuel_price_id, self.fuel_price.pk)
         self.assertEqual(expense.supplier, "City Garage")
         self.assertEqual(expense.description, "Fuel 10 litres in AFY-6897 by Trevor Moyo")
         self.assertEqual(expense.added_by_id, self.staff_user.pk)
@@ -94,7 +104,7 @@ class FuelExpenseCreationTests(TestCase):
     def test_invalid_financial_input_creates_no_records(self):
         for invalid_fields in (
             {"account_id": 999999},
-            {"expense_type_id": 999999},
+            {"fuel_type": "kerosene"},
             {"total_cost": "0"},
         ):
             with self.subTest(invalid_fields=invalid_fields):
@@ -108,6 +118,33 @@ class FuelExpenseCreationTests(TestCase):
                 self.assertEqual(FuelRecord.objects.count(), 0)
                 self.assertEqual(Expense.objects.count(), 0)
                 self.assertEqual(LedgerEntry.objects.count(), 0)
+
+    def test_driver_can_record_only_assigned_vehicle_with_branch_fuel_account(self):
+        fuel_account = Account.objects.create(name="Fuel", branch=self.branch, currency="USD")
+        assigned_at = timezone.now()
+        mileage = MileageRecord.objects.create(
+            vehicle=self.vehicle,
+            odometer_km=12000,
+            recorded_at=assigned_at,
+            source=MileageRecord.Source.ASSIGNMENT_START,
+        )
+        VehicleAssignment.objects.create(
+            vehicle=self.vehicle,
+            driver=self.driver,
+            assigned_at=assigned_at,
+            start_mileage_record=mileage,
+        )
+        self.client.force_authenticate(self.driver_user)
+        response = self.client.post(
+            "/api/vehicles/fuel-records/",
+            self.payload(account_id=self.account.pk),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        expense = Expense.objects.get(pk=response.data["expense"])
+        self.assertEqual(expense.account_id, fuel_account.pk)
+        self.assertEqual(expense.expense_type.name, "Fuel")
+        self.assertEqual(FuelRecord.objects.get(pk=response.data["id"]).driver_id, self.driver.pk)
 
     def test_historical_fuel_record_without_expense_remains_readable(self):
         fuel = FuelRecord.objects.create(
@@ -150,6 +187,45 @@ class FuelExpenseCreationTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("vehicle_id", response.data)
+
+
+class FuelPriceTests(TestCase):
+    def test_scraper_parses_both_products_and_currencies(self):
+        html = """
+        <p>As Of: 20-11-2026</p>
+        <h3>Petrol Blend (E20)</h3><span>$ 2.05 USD Per Litre</span><span>$ 54.70 ZWG Per Litre</span>
+        <h3>Diesel (D50)</h3><span>$ 2.04 USD Per Litre</span><span>$ 54.55 ZWG Per Litre</span>
+        """
+        response = Mock(text=html)
+        response.raise_for_status.return_value = None
+        with patch("apps.vehicles.fuel_prices.requests.get", return_value=response):
+            effective_date, prices = scrape_zera_prices()
+
+        self.assertEqual(effective_date.isoformat(), "2026-11-20")
+        self.assertEqual(prices[(FuelRecord.FuelType.PETROL, FuelPrice.Currency.USD)], Decimal("2.05"))
+        self.assertEqual(prices[(FuelRecord.FuelType.DIESEL, FuelPrice.Currency.ZWG)], Decimal("54.55"))
+
+    def test_incomplete_source_does_not_store_partial_rates(self):
+        html = "<p>As Of: 20-11-2026</p><h3>Petrol Blend (E20)</h3>$ 2.05 USD Per Litre $ 54.70 ZWG Per Litre"
+        response = Mock(text=html)
+        response.raise_for_status.return_value = None
+        with patch("apps.vehicles.fuel_prices.requests.get", return_value=response):
+            with self.assertRaises(ValueError):
+                refresh_fuel_prices()
+        self.assertEqual(FuelPrice.objects.count(), 0)
+
+    def test_refresh_adds_only_changed_prices(self):
+        rates = {
+            (fuel_type, currency): Decimal(value)
+            for fuel_type, values in (("petrol", ("2.05", "54.70")), ("diesel", ("2.04", "54.55")))
+            for currency, value in zip(("USD", "ZWG"), values)
+        }
+        with patch("apps.vehicles.fuel_prices.scrape_zera_prices", return_value=(timezone.localdate(), rates)):
+            self.assertEqual(len(refresh_fuel_prices()), 4)
+            self.assertEqual(len(refresh_fuel_prices()), 0)
+            rates[("petrol", "USD")] = Decimal("2.10")
+            self.assertEqual(len(refresh_fuel_prices()), 1)
+        self.assertEqual(FuelPrice.objects.count(), 5)
 
 
 class VehicleAssetTests(TestCase):
