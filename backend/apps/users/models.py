@@ -27,6 +27,7 @@ class Staff(models.Model):
 
 class Customer(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
+    self_registered = models.BooleanField(default=False)
     date_joined = models.DateField(auto_now_add=True)
 
     def __str__(self):

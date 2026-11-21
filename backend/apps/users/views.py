@@ -494,7 +494,7 @@ class CustomerRegisterLoginView(APIView):
         user = User.objects.create_user(
             username=username, password=CUSTOMER_DEFAULT_PASSWORD
         )
-        Customer.objects.create(user=user)
+        Customer.objects.create(user=user, self_registered=True)
 
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
