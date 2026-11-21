@@ -12,6 +12,7 @@ from .models import (
     VehicleAssignment,
     MileageRecord,
     FuelRecord,
+    FuelPrice,
     ServiceRecord,
     InsurancePolicy,
     LicensingRecord,
@@ -246,11 +247,11 @@ class MileageRecordSerializer(serializers.ModelSerializer):
 
 class FuelRecordSerializer(serializers.ModelSerializer):
     account_id = serializers.PrimaryKeyRelatedField(
-        source="account", queryset=Account.objects.all(), write_only=True
+        source="account", queryset=Account.objects.all(), write_only=True, required=False
     )
-    expense_type_id = serializers.PrimaryKeyRelatedField(
-        source="expense_type", queryset=ExpenseAccount.objects.all(), write_only=True
-    )
+    fuel_type = serializers.ChoiceField(choices=FuelRecord.FuelType.choices)
+    quantity_litres = serializers.DecimalField(max_digits=9, decimal_places=3, read_only=True)
+    fuel_price = serializers.PrimaryKeyRelatedField(read_only=True, allow_null=True)
     total_cost = serializers.DecimalField(
         max_digits=12, decimal_places=2, min_value=Decimal("0.01"), write_only=True
     )
@@ -260,23 +261,43 @@ class FuelRecordSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if self.instance is None:
-            missing = [field for field in ("account", "expense_type", "total_cost") if field not in attrs]
+            missing = [field for field in ("total_cost", "fuel_type") if field not in attrs]
             if missing:
-                raise serializers.ValidationError({
-                    {"account": "account_id", "expense_type": "expense_type_id", "total_cost": "total_cost"}[field]: "This field is required."
-                    for field in missing
-                })
+                raise serializers.ValidationError({field: "This field is required." for field in missing})
+            request = self.context.get("request")
+            from apps.users.models import Staff
+            is_staff = bool(request and (request.user.is_superuser or Staff.objects.filter(user_id=request.user.pk).exists()))
+            if "account" not in attrs and not is_staff and request:
+                from apps.users.models import Biker
+                biker = Biker.objects.filter(user=request.user).select_related("branch").first()
+                if biker and biker.branch_id:
+                    account = Account.objects.filter(
+                        branch_id=biker.branch_id, currency="USD", name__iexact="Fuel"
+                    ).order_by("pk").first()
+                    if account is not None:
+                        attrs["account"] = account
+            if "account" not in attrs:
+                raise serializers.ValidationError({"account_id": "A USD fuel ledger account is required."})
+            if attrs["account"].currency != "USD":
+                raise serializers.ValidationError({"account_id": "Fuel record expenses must use a USD account."})
+            price = FuelPrice.objects.filter(
+                fuel_type=attrs["fuel_type"], currency=FuelPrice.Currency.USD
+            ).order_by("-effective_date", "-fetched_at", "-pk").first()
+            if price is None:
+                raise serializers.ValidationError({"fuel_type": "No current USD price is available for this fuel type."})
+            attrs["fuel_price"] = price
+            attrs["quantity_litres"] = (attrs["total_cost"] / price.price_per_litre).quantize(Decimal("0.001"))
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
         account = validated_data.pop("account")
-        expense_type = validated_data.pop("expense_type")
         amount = validated_data.pop("total_cost")
         supplier = validated_data.pop("station", "")
         expense_date = validated_data.pop("actual_date", None)
         recorded_by = validated_data.get("recorded_by")
 
+        expense_type, _ = ExpenseAccount.objects.get_or_create(name__iexact="Fuel", defaults={"name": "Fuel"})
         fuel_record = FuelRecord.objects.create(**validated_data)
         vehicle = fuel_record.vehicle
         driver_name = (
@@ -313,9 +334,16 @@ class FuelRecordSerializer(serializers.ModelSerializer):
         fields = (
             "id", "expense", "vehicle", "driver", "recorded_at", "quantity_litres",
             "odometer_km", "notes", "recorded_by", "created_at", "account_id",
-            "expense_type_id", "total_cost", "station", "actual_date",
+            "fuel_type", "total_cost", "station", "actual_date", "fuel_price",
         )
         read_only_fields = ("recorded_by", "created_at", "expense")
+
+
+class FuelPriceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FuelPrice
+        fields = ("id", "fuel_type", "currency", "price_per_litre", "effective_date", "source", "fetched_at")
+        read_only_fields = fields
 
 
 class ServiceRecordSerializer(serializers.ModelSerializer):

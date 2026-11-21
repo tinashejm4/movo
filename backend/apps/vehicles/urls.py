@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views.assignment_views import VehicleAssignmentViewSet
 from .views.record_views import (
     FuelRecordViewSet,
+    FuelPriceViewSet,
     InsurancePolicyViewSet,
     LicensingRecordViewSet,
     MileageRecordViewSet,
@@ -16,6 +17,7 @@ router.register("vehicles", VehicleViewSet, basename="vehicle")
 router.register("assignments", VehicleAssignmentViewSet, basename="vehicle-assignment")
 router.register("mileage-records", MileageRecordViewSet, basename="mileage-record")
 router.register("fuel-records", FuelRecordViewSet, basename="fuel-record")
+router.register("fuel-prices", FuelPriceViewSet, basename="fuel-price")
 router.register("service-records", ServiceRecordViewSet, basename="service-record")
 router.register("insurance-policies", InsurancePolicyViewSet, basename="insurance-policy")
 router.register("licensing-records", LicensingRecordViewSet, basename="licensing-record")
