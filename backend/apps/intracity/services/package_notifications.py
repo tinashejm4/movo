@@ -99,6 +99,66 @@ def send_package_booking_sms(phone_number, package, invoice):
     )
     return False
 
+def notify_management_sms(package, invoice):
+    DEFAULT_PHONE_NUMBER = "0716633439"
+    """Send a notification SMS to management about a package booking."""
+    if not settings.TXTCONSOLE_SYSTEM_ID or not settings.TXTCONSOLE_PASSWORD:
+        logger.error(
+            "Management SMS skipped for package %s: provider credentials are missing",
+            package.slug,
+        )
+        return False
+
+    sender = package.sender
+    receiver = package.receiver
+    creator = sender if package.is_sender_initiated else receiver
+    message  = f"New Movo Package. Created by 0{creator.user.username}. Origin in {package.pickup_area.name} by 0{sender.user.username}. " \
+               f"Dropoff to {package.dropoff_area.name} by 0{receiver.user.username}. Amount ${invoice.amount}"
+
+    credentials = (
+        f"{settings.TXTCONSOLE_SYSTEM_ID}:{settings.TXTCONSOLE_PASSWORD}".encode()
+    )
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": "Basic " + base64.b64encode(credentials).decode(),
+    }
+    payload = {
+        "destination": f"263{normalize_zimbabwean_number(DEFAULT_PHONE_NUMBER)}",
+        "text": message,
+        "source": settings.TXTCONSOLE_SOURCE,
+    }
+    if settings.TXTCONSOLE_RECEIPT_URL:
+        payload["receiptURL"] = settings.TXTCONSOLE_RECEIPT_URL
+
+    try:
+        provider_response = requests.post(
+            settings.TXTCONSOLE_SMS_URL + "/sms",
+            json=payload,
+            headers=headers,
+            timeout=20,
+        )
+    except requests.RequestException:
+        logger.exception(
+            "txtConsole management SMS send exception for package %s",
+            package.slug,
+        )
+        return False
+
+    if provider_response.status_code < 400:
+        return True
+
+    try:
+        error_details = provider_response.json()
+    except ValueError:
+        error_details = {"message": provider_response.text}
+
+    logger.warning(
+        "txtConsole management SMS send failed for package %s: %s",
+        package.slug,
+        error_details,
+    )
+    return False
 
 def _truncate_address(address, max_length):
     if len(address) > max_length:
