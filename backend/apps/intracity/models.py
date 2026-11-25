@@ -135,7 +135,11 @@ class Invoice(models.Model):
         ("PaynowEcocash", "PaynowEcocash"),
     ]
 
-    package = models.OneToOneField(Package, on_delete=models.CASCADE)
+    package = models.OneToOneField(Package, on_delete=models.CASCADE, null=True, blank=True)
+    round_trip = models.OneToOneField(
+        "RoundTripOrder", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="invoice",
+    )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     exchange_rate = models.ForeignKey(
         ExchangeRate, on_delete=models.SET_NULL, null=True, blank=True
@@ -147,9 +151,16 @@ class Invoice(models.Model):
     is_paid = models.BooleanField(default=False)
     paid_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(package__isnull=False, round_trip__isnull=True)
+                       | models.Q(package__isnull=True, round_trip__isnull=False)),
+            name="intracity_invoice_one_owner",
+        )]
+
     def __str__(self):
         return (
-            f'Payment for {self.package.slug} - {"Paid" if self.is_paid else "Unpaid"}'
+            f'Payment for {(self.package or self.round_trip).slug} - {"Paid" if self.is_paid else "Unpaid"}'
         )
 
     def amount_in_zig(self):
@@ -234,3 +245,125 @@ class PaynowPayment(models.Model):
 
     def __str__(self):
         return f"Invoice: {self.invoice.id} - {'Successful' if self.is_successful else 'Failed'}"
+
+
+class RoundTripOrder(models.Model):
+    STATUS = [(value, value) for value in (
+        "Pending", "Assigned", "In Transit", "Exception", "Completed", "Cancelled"
+    )]
+    slug = models.SlugField(max_length=32, unique=True, editable=False)
+    sender = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="round_trips_sent")
+    recipient = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="round_trips_received")
+    city = models.ForeignKey(City, on_delete=models.PROTECT)
+    biker = models.ForeignKey(Biker, on_delete=models.SET_NULL, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="Pending")
+    cash_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    cash_currency = models.CharField(max_length=3, choices=[("USD", "USD"), ("ZIG", "ZIG")])
+    is_fast_delivery = models.BooleanField(default=False)
+    comments = models.TextField(max_length=500, blank=True)
+    assigned_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    exception_reason = models.CharField(max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "created_at"], name="intracity_rt_queue_idx"),
+            models.Index(fields=["biker", "status"], name="intracity_rt_biker_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = f"rt-{secrets.token_hex(6)}"
+        super().save(*args, **kwargs)
+
+
+class RoundTripParcel(models.Model):
+    order = models.OneToOneField(RoundTripOrder, on_delete=models.CASCADE, related_name="parcel")
+    description = models.TextField(max_length=500)
+
+
+class RoundTripAssignment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey(RoundTripOrder, on_delete=models.CASCADE, related_name="assignments")
+    biker = models.ForeignKey(Biker, on_delete=models.PROTECT)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+
+class RoundTripStop(models.Model):
+    KINDS = [(value, value) for value in ("sender_pickup", "recipient", "sender_return")]
+    order = models.ForeignKey(RoundTripOrder, on_delete=models.CASCADE, related_name="stops")
+    sequence = models.PositiveSmallIntegerField()
+    kind = models.CharField(max_length=20, choices=KINDS)
+    area = models.ForeignKey(Suburb, on_delete=models.PROTECT)
+    address = models.CharField(max_length=255)
+    contact = models.ForeignKey(Customer, on_delete=models.PROTECT)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    otp_hash = models.CharField(max_length=128, blank=True)
+    otp_issued_at = models.DateTimeField(null=True, blank=True)
+    otp_used_at = models.DateTimeField(null=True, blank=True)
+    otp_assignment = models.ForeignKey(RoundTripAssignment, on_delete=models.SET_NULL, null=True, blank=True)
+    otp_failures = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sequence"]
+        constraints = [models.UniqueConstraint(fields=["order", "sequence"], name="uniq_round_trip_stop_sequence")]
+
+
+class RoundTripStopAction(models.Model):
+    TYPES = [(value, value) for value in (
+        "PICKUP_ITEM", "DROP_OFF_ITEM", "COLLECT_CASH", "HAND_OVER_CASH", "VERIFY_HANDOFF"
+    )]
+    stop = models.ForeignKey(RoundTripStop, on_delete=models.CASCADE, related_name="actions")
+    action = models.CharField(max_length=20, choices=TYPES)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["stop", "action"], name="uniq_round_trip_stop_action")]
+
+
+class RoundTripPOD(models.Model):
+    stop = models.OneToOneField(RoundTripStop, on_delete=models.PROTECT, related_name="pod")
+    assignment = models.ForeignKey(RoundTripAssignment, on_delete=models.PROTECT)
+    image = models.ImageField(upload_to="round_trip_pod/")
+    upload_id = models.UUIDField(unique=True)
+    sha256 = models.CharField(max_length=64)
+    uploaded_by = models.ForeignKey(User, on_delete=models.PROTECT)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+
+class RoundTripCashEvent(models.Model):
+    KINDS = [("collected", "Collected"), ("returned", "Returned")]
+    order = models.ForeignKey(RoundTripOrder, on_delete=models.PROTECT, related_name="cash_events")
+    stop = models.OneToOneField(RoundTripStop, on_delete=models.PROTECT)
+    assignment = models.ForeignKey(RoundTripAssignment, on_delete=models.PROTECT)
+    kind = models.CharField(max_length=10, choices=KINDS)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    recorded_by = models.ForeignKey(User, on_delete=models.PROTECT)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+
+class RoundTripVerificationAttempt(models.Model):
+    stop = models.ForeignKey(RoundTripStop, on_delete=models.CASCADE, related_name="verification_attempts")
+    assignment = models.ForeignKey(RoundTripAssignment, on_delete=models.PROTECT)
+    biker = models.ForeignKey(Biker, on_delete=models.PROTECT)
+    accepted = models.BooleanField(default=False)
+    reason = models.CharField(max_length=100, blank=True)
+    attempted_at = models.DateTimeField(auto_now_add=True)
+
+
+class RoundTripResolution(models.Model):
+    OUTCOMES = [(value, value) for value in ("resume", "cancelled")]
+    order = models.ForeignKey(RoundTripOrder, on_delete=models.PROTECT, related_name="resolutions")
+    outcome = models.CharField(max_length=12, choices=OUTCOMES)
+    reason = models.TextField()
+    actual_collected = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    actual_returned = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    reported_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    reported_currency = models.CharField(max_length=3, blank=True)
+    item_returned_to_sender = models.BooleanField(default=False)
+    resolved_by = models.ForeignKey(User, on_delete=models.PROTECT)
+    resolved_at = models.DateTimeField(auto_now_add=True)

@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 
 from ..models import EcocashPayment, PackageStatus, PaynowPayment
-from .package_access import package_payer_user_id
+from .invoice_owner import invoice_order, invoice_payer, invoice_is_cancelled
 
 
 PAYMENT_ATTEMPT_PENDING_WINDOW = timedelta(minutes=2)
@@ -15,14 +15,7 @@ def invoice_user_is_payer(invoice, user_id):
         return False
 
     try:
-        package = invoice.package
-        participant_user_ids = {
-            package.sender.user_id,
-            package.receiver.user_id,
-        }
-        if user_id not in participant_user_ids:
-            return False
-        return user_id == package_payer_user_id(package, invoice)
+        return user_id == invoice_payer(invoice).user_id
     except (AttributeError, TypeError):
         return False
 
@@ -34,8 +27,8 @@ def invoice_user_is_assigned_biker(invoice, user_id):
 
     try:
         return (
-            invoice.package.biker is not None
-            and invoice.package.biker.user_id == user_id
+            invoice_order(invoice).biker is not None
+            and invoice_order(invoice).biker.user_id == user_id
         )
     except (AttributeError, TypeError):
         return False
@@ -48,7 +41,7 @@ def invoice_user_can_start_payment(invoice, user_id):
         or invoice_user_is_assigned_biker(invoice, user_id)
     ):
         return False
-    if invoice.is_paid or package_is_cancelled(invoice.package):
+    if invoice.is_paid or invoice_is_cancelled(invoice):
         return False
 
     try:
@@ -89,7 +82,7 @@ def package_is_cancelled(package):
 def invoice_user_can_pay(invoice, user_id):
     if not invoice_user_is_payer(invoice, user_id):
         return False
-    if invoice.is_paid or package_is_cancelled(invoice.package):
+    if invoice.is_paid or invoice_is_cancelled(invoice):
         return False
 
     try:

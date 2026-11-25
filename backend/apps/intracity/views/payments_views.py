@@ -21,6 +21,10 @@ from ..services.invoice_payment import (
     invoice_user_is_assigned_biker,
     invoice_user_is_payer,
 )
+from ..services.invoice_owner import (
+    ensure_invoice_refund_review, invoice_is_cancelled, invoice_order, invoice_payer,
+    lock_invoice_order,
+)
 from apps.users.models import Customer
 from drf_spectacular.utils import OpenApiResponse, extend_schema, OpenApiParameter
 from ..serializers.payment_serializer import (
@@ -56,7 +60,8 @@ class PaymentViewSet(ViewSet):
     
     @staticmethod
     def _is_econet_number(phone_number):
-        return phone_number[1] == "7" or phone_number[1] == "8"
+        normalized = normalize_zimbabwean_number(phone_number)
+        return len(normalized) == 9 and normalized[:2] in {"77", "78"}
 
     @staticmethod
     def _to_json_safe(value):
@@ -112,6 +117,9 @@ class PaymentViewSet(ViewSet):
                 "package__sender__user",
                 "package__receiver__user",
                 "package__biker__user",
+                "round_trip__sender__user",
+                "round_trip__recipient__user",
+                "round_trip__biker__user",
             )
             .filter(id=invoice_id)
             .first()
@@ -159,7 +167,7 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        ref = f"REF-{invoice.package.slug}-{random.randint(100000, 999999)}"
+        ref = f"REF-{invoice_order(invoice).slug}-{random.randint(100000, 999999)}"
         payment = paynow.create_payment(ref, "movo@example.com")
         payment.add("Online Payment", invoice.amount)
         logger.info(f"Initiating Paynow payment for invoice {invoice.id} with reference {ref} and amount {invoice.amount}. Phone number: {phone_number}")
@@ -181,11 +189,7 @@ class PaymentViewSet(ViewSet):
             PaynowPayment.objects.create(
                 # A biker may initiate the request on the customer's behalf;
                 # the attempt remains owned by the invoice payer.
-                customer=(
-                    invoice.package.receiver
-                    if invoice.is_pay_forward
-                    else invoice.package.sender
-                ),
+                customer=invoice_payer(invoice),
                 invoice=invoice,
                 phone_number=phone_number,
                 reference=ref,
@@ -240,9 +244,7 @@ class PaymentViewSet(ViewSet):
     @transaction.atomic
     def paynow_notify(self, request):
         invoice_id = request.query_params.get("invoice_id")
-        package_id = Invoice.objects.filter(id=invoice_id).values_list("package_id", flat=True).first()
-        if package_id:
-            Package.objects.select_for_update().get(pk=package_id)
+        lock_invoice_order(invoice_id)
         invoice = Invoice.objects.select_for_update().filter(id=invoice_id).first()
 
         if not invoice:
@@ -254,8 +256,8 @@ class PaymentViewSet(ViewSet):
             )
 
         if invoice.is_paid:
-            if latest_status_for(invoice.package) == "Cancelled":
-                ensure_refund_review(invoice.package)
+            if invoice_is_cancelled(invoice):
+                ensure_invoice_refund_review(invoice)
             return Response(
                 {
                     "message": "Invoice is already paid",
@@ -298,8 +300,8 @@ class PaymentViewSet(ViewSet):
                 },
             )
 
-            if latest_status_for(invoice.package) == "Cancelled":
-                ensure_refund_review(invoice.package)
+            if invoice_is_cancelled(invoice):
+                ensure_invoice_refund_review(invoice)
 
             return Response(
                 PaynowPaymentProcessedResponseSerializer(
@@ -331,20 +333,9 @@ class PaymentViewSet(ViewSet):
         invoice_id = serializer.validated_data["invoice_id"]
         phone_number = serializer.validated_data["phone_number"]
 
-        phone_number = f"263{normalize_zimbabwean_number(phone_number)}"
-
-        if not is_valid_zimbabwean_number(phone_number) or not self._is_econet_number(phone_number):
-            return Response(
-                PaymentErrorResponseSerializer(
-                    {
-                        "error": "Invalid Zimbabwean or Econet phone number format",
-                    }
-                ).data,
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        invoice = Invoice.objects.select_for_update().select_related(
-            "package__sender__user", "package__receiver__user"
+        invoice = Invoice.objects.select_for_update(of=("self",)).select_related(
+            "package__sender__user", "package__receiver__user",
+            "round_trip__sender__user", "round_trip__recipient__user"
         ).filter(id=invoice_id).first()
 
         if not invoice:
@@ -379,6 +370,15 @@ class PaymentViewSet(ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        phone_number = f"263{normalize_zimbabwean_number(phone_number)}"
+        if not is_valid_zimbabwean_number(phone_number) or not self._is_econet_number(phone_number):
+            return Response(
+                PaymentErrorResponseSerializer(
+                    {"error": "Invalid Zimbabwean or Econet phone number format"}
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         headers={
             "Content-Type": "application/json",
             "Authorization": os.environ.get("ECOCASH_AUTH_HEADER"),
@@ -388,7 +388,7 @@ class PaymentViewSet(ViewSet):
         url = os.environ.get("ECOCASH_API_URL", "https://developers.ecocash.co.zw/sandbox/payment/v1/") + "transactions/amount/"
 
         data = {
-                "clientCorrelator": "REF-" + str(invoice.package.slug) + "-" + str(random.randint(100000, 999999)),
+                "clientCorrelator": "REF-" + str(invoice_order(invoice).slug) + "-" + str(random.randint(100000, 999999)),
                 "referenceCode": f"{invoice_id}",
                 "tranType": "MER",
                 "endUserId": phone_number,
@@ -486,10 +486,7 @@ class PaymentViewSet(ViewSet):
             )
 
         invoice_id = int(merchant_reference)
-
-        package_id = Invoice.objects.filter(id=invoice_id).values_list("package_id", flat=True).first()
-        if package_id:
-            Package.objects.select_for_update().get(pk=package_id)
+        lock_invoice_order(invoice_id)
         invoice = Invoice.objects.select_for_update().filter(id=invoice_id).first()
         if not invoice:
             return Response(
@@ -510,8 +507,8 @@ class PaymentViewSet(ViewSet):
             ecocash_payment.provider_response = payload
             ecocash_payment.save(update_fields=["is_successful", "paid_at", "provider_response"])
 
-        if latest_status_for(invoice.package) == "Cancelled":
-            ensure_refund_review(invoice.package)
+        if invoice_is_cancelled(invoice):
+            ensure_invoice_refund_review(invoice)
 
 
         return Response(

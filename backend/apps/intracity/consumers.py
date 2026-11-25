@@ -6,7 +6,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.db.models import Q
 
-from .models import Package
+from .models import Package, RoundTripOrder
 from .services.current_package_updates import current_packages_group_name
 
 
@@ -37,6 +37,7 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
             return
 
         self.package_id = self.scope["url_route"]["kwargs"].get("package_id")
+        self.round_trip_id = self.scope["url_route"]["kwargs"].get("round_trip_id")
         if self.package_id is not None and not await self._can_access_package(
             self.package_id
         ):
@@ -45,11 +46,16 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
                 reason="Not authorized to access this package.",
             )
             return
+        if self.round_trip_id is not None and not await self._can_access_round_trip(
+            self.round_trip_id
+        ):
+            await self.close(code=4403, reason="Not authorized to access this round trip.")
+            return
 
         self.group_name = (
-            f"package_{self.package_id}"
-            if self.package_id is not None
-            else current_packages_group_name(self.user.id)
+            f"round_trip_{self.round_trip_id}" if self.round_trip_id is not None
+            else (f"package_{self.package_id}" if self.package_id is not None
+                  else current_packages_group_name(self.user.id))
         )
 
         # Accept first so a slow/unreachable channel layer never blocks the handshake.
@@ -72,6 +78,7 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
                     "data": {
                         "group": self.group_name,
                         "package_id": self.package_id,
+                        "round_trip_id": self.round_trip_id,
                         "subscribed": self.subscribed_to_groups,
                     },
                 }
@@ -125,6 +132,19 @@ class PackageAssignmentConsumer(AsyncWebsocketConsumer):
                 }
             )
         )
+
+    async def round_trip_assigned(self, event):
+        payload = event.get("payload", {})
+        if not await self._can_access_round_trip(payload.get("round_trip_id")):
+            return
+        await self.send(text_data=json.dumps({"event": "round_trip_assigned", "data": payload}))
+
+    @database_sync_to_async
+    def _can_access_round_trip(self, round_trip_id):
+        return RoundTripOrder.objects.filter(id=round_trip_id).filter(
+            Q(sender__user_id=self.user.id) | Q(recipient__user_id=self.user.id)
+            | Q(biker__user_id=self.user.id)
+        ).exists()
 
     @database_sync_to_async
     def _can_access_package(self, package_id):

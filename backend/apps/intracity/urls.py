@@ -5,6 +5,7 @@ from .views.delivery_views import DeliveryViewSet
 from .views.invoice_views import InvoiceViewSet
 from .views.package_views import PackageViewSet
 from .views.payments_views import PaymentViewSet
+from .views.round_trip_views import RoundTripViewSet
 
 package_create = PackageViewSet.as_view({"post": "create_package"})
 package_detail = PackageViewSet.as_view({"get": "package_detail"})
@@ -34,8 +35,28 @@ package_images = PackageViewSet.as_view(
     parser_classes=[MultiPartParser, FormParser],
 )
 
+round_trip_price = RoundTripViewSet.as_view({"post": "calculate_price"})
+round_trip_collection = RoundTripViewSet.as_view({"post": "create", "get": "list"})
+round_trip_detail = RoundTripViewSet.as_view({"get": "retrieve"})
+round_trip_verify = RoundTripViewSet.as_view({"post": "verify_stop"})
+round_trip_resend_otp = RoundTripViewSet.as_view({"post": "resend_otp"})
+round_trip_fail = RoundTripViewSet.as_view({"post": "fail_stop"})
+round_trip_pod = RoundTripViewSet.as_view({"post": "upload_pod", "get": "download_pod"},
+                                         parser_classes=[MultiPartParser, FormParser])
+round_trip_cancel = RoundTripViewSet.as_view({"post": "cancel"})
+round_trip_resolve = RoundTripViewSet.as_view({"post": "resolve"})
+
 
 urlpatterns = [
+    path("round-trips/calculate-price/", round_trip_price, name="intracity_round_trip_price"),
+    path("round-trips/", round_trip_collection, name="intracity_round_trip_collection"),
+    path("round-trips/<int:pk>/", round_trip_detail, name="intracity_round_trip_detail"),
+    path("round-trips/<int:pk>/cancel/", round_trip_cancel, name="intracity_round_trip_cancel"),
+    path("round-trips/<int:pk>/resolve/", round_trip_resolve, name="intracity_round_trip_resolve"),
+    path("round-trips/<int:pk>/stops/<int:stop_id>/verify/", round_trip_verify, name="intracity_round_trip_verify"),
+    path("round-trips/<int:pk>/stops/<int:stop_id>/otp/resend/", round_trip_resend_otp, name="intracity_round_trip_resend_otp"),
+    path("round-trips/<int:pk>/stops/<int:stop_id>/fail/", round_trip_fail, name="intracity_round_trip_fail"),
+    path("round-trips/<int:pk>/stops/<int:stop_id>/pod/", round_trip_pod, name="intracity_round_trip_pod"),
     path(
         "sender-receiver-login/",
         sender_receiver_login,

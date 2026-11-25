@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from apps.users.models import City
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from ..models import Package, Invoice, PaynowPayment, Price
+from ..models import Package, Invoice, PaynowPayment, Price, RoundTripOrder
 from ..serializers.invoice_serializer import (
     InvoiceDetailsQuerySerializer,
     InvoiceDetailsResponseSerializer,
@@ -18,6 +18,7 @@ from ..services.invoice_payment import (
     invoice_user_can_pay,
     invoice_user_is_payer,
 )
+from ..services.invoice_owner import invoice_order, order_participant_user_ids
 
 paynow = Paynow(
         os.environ.get("PAYNOW_INTEGRATION_ID", ""),
@@ -47,39 +48,43 @@ class InvoiceViewSet(ViewSet):
 
     def invoice_details(self, request):
         package_id = request.query_params.get("package_id")
+        round_trip_id = request.query_params.get("round_trip_id")
         invoice_id = request.query_params.get("invoice_id")
-        if not package_id and not invoice_id:
+        if not package_id and not round_trip_id and not invoice_id:
             return Response(
-                {"error": "package_id or invoice_id is required"},
+                {"error": "package_id, round_trip_id or invoice_id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         invoice = None
         if invoice_id:
             invoice = Invoice.objects.select_related(
-                "package__sender__user", "package__receiver__user", "package__biker__user"
+                "package__sender__user", "package__receiver__user", "package__biker__user",
+                "round_trip__sender__user", "round_trip__recipient__user", "round_trip__biker__user",
             ).filter(id=invoice_id).first()
             if not invoice:
                 return Response(
                     {"error": "invoice not found"}, status=status.HTTP_404_NOT_FOUND
                 )
-            package = invoice.package
+            order = invoice_order(invoice)
+        elif round_trip_id:
+            order = RoundTripOrder.objects.select_related(
+                "sender__user", "recipient__user", "biker__user"
+            ).filter(id=round_trip_id).first()
+            if order:
+                invoice = Invoice.objects.filter(round_trip=order).first()
         else:
-            package = Package.objects.select_related(
+            order = Package.objects.select_related(
                 "sender__user", "receiver__user", "biker__user"
             ).filter(id=package_id).first()
-            if package:
-                invoice = Invoice.objects.filter(package=package).first()
+            if order:
+                invoice = Invoice.objects.filter(package=order).first()
 
-        if not package:
+        if not order:
             return Response(
-                {"error": "package not found"}, status=status.HTTP_404_NOT_FOUND
+                {"error": "order not found"}, status=status.HTTP_404_NOT_FOUND
             )
-        if request.user.id not in {
-            package.sender.user_id,
-            package.receiver.user_id,
-            package.biker.user_id if package.biker else None,
-        }:
+        if request.user.id not in order_participant_user_ids(order):
             return Response(
                 {
                     "error": "You do not have access to this invoice",
@@ -97,15 +102,9 @@ class InvoiceViewSet(ViewSet):
             if last_saved_payment.exists():
                 last_saved_payment = last_saved_payment.last()
             poll_url = last_saved_payment.poll_url if last_saved_payment else None
-            if not poll_url:
-                return Response(
-                    {"error": "Poll URL not found for the provided Paynow payment"},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+            poll_response = paynow.check_transaction_status(poll_url) if poll_url else None
 
-            poll_response = paynow.check_transaction_status(poll_url)
-
-            if poll_response.status == "paid":
+            if poll_response and poll_response.status == "paid":
                 last_saved_payment.is_successful = True
                 last_saved_payment.paid_at = timezone.now()
                 last_saved_payment.save(update_fields=["is_successful", "paid_at"])
@@ -119,7 +118,8 @@ class InvoiceViewSet(ViewSet):
 
         serializer = InvoiceDetailsResponseSerializer(
             {
-                "package_id": package.id,
+                "package_id": order.id if isinstance(order, Package) else None,
+                **({"round_trip_id": order.id} if isinstance(order, RoundTripOrder) else {}),
                 "invoice_id": invoice.id if invoice else None,
                 "is_paid": invoice.is_paid if invoice else None,
                 "payment_method": payment_method,

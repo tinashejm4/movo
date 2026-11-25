@@ -12,6 +12,7 @@ from apps.notifications.services import queue_package_customer_notification
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from ..models import Package, PackageStatus, Invoice, SuburbSearchLog
 from ..services.package_assignment import assign_pending_packages
+from ..services.round_trip_dispatch import assign_pending_round_trips_safely
 from ..services.package_cancellation import can_cancel_package
 from ..services.package_access import package_user_can_cancel
 from ..services.package_access import package_initiator_user_id
@@ -46,7 +47,9 @@ class DeliveryViewSet(ViewSet):
     )
     @transaction.atomic
     def assign_pending_packages(self, request):
-        return Response(assign_pending_packages(), status=status.HTTP_200_OK)
+        result = assign_pending_packages()
+        assign_pending_round_trips_safely()
+        return Response(result, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["Deliveries"],

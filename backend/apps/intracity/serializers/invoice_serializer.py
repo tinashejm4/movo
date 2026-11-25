@@ -9,11 +9,13 @@ class InvoiceErrorResponseSerializer(serializers.Serializer):
 
 class InvoiceDetailsQuerySerializer(serializers.Serializer):
     package_id = serializers.IntegerField(required=False)
+    round_trip_id = serializers.IntegerField(required=False)
     invoice_id = serializers.IntegerField(required=False)
 
 
 class InvoiceDetailsResponseSerializer(serializers.Serializer):
-    package_id = serializers.IntegerField()
+    package_id = serializers.IntegerField(allow_null=True)
+    round_trip_id = serializers.IntegerField(allow_null=True, required=False)
     invoice_id = serializers.IntegerField(allow_null=True)
     is_paid = serializers.BooleanField(allow_null=True)
     payment_method = serializers.ChoiceField(

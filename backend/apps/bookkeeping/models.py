@@ -146,7 +146,7 @@ class IntracitySale(models.Model):
             self.amount = float(self.ledger_entry.amount)
 
         if not self.description and self.invoice_id:
-            self.description = self.invoice.package.slug
+            self.description = (self.invoice.package or self.invoice.round_trip).slug
 
         super().save(*args, **kwargs)
 

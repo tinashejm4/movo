@@ -11,7 +11,7 @@ from apps.transporters.models import BikerDailySession
 from apps.transporters.shift_service import effective_shift, shift_allows_work
 from apps.notifications.services import queue_package_assignment_notifications
 
-from ..models import Package, PackageStatus
+from ..models import Package, PackageStatus, RoundTripOrder
 from .current_package_updates import notify_current_packages_changed
 
 logger = logging.getLogger(__name__)
@@ -32,13 +32,18 @@ def is_biker_busy(biker):
     if not session.is_active:
         return True
 
+    if RoundTripOrder.objects.filter(
+        biker=biker, status__in=["Pending", "Assigned", "In Transit", "Exception"]
+    ).exists():
+        return True
+
     latest_status = (
         PackageStatus.objects.filter(package=OuterRef("pk"))
         .order_by("-updated_at", "-pk")
         .values("status")[:1]
     )
     return (
-        Package.objects.filter(biker=biker, added_at__date=timezone.localdate(now))
+        Package.objects.filter(biker=biker)
         .annotate(current_status=Subquery(latest_status))
         .filter(current_status__in=["Pending", "Assigned", "In Transit"])
         .exists()
@@ -121,10 +126,13 @@ def assign_pending_packages():
 def assign_pending_packages_safely():
     """Run automatic dispatch without breaking the package-creation response."""
     try:
-        return assign_pending_packages()
+        result = assign_pending_packages()
     except Exception:
         logger.exception("Automatic package assignment failed")
-        return _result("Automatic package assignment failed")
+        result = _result("Automatic package assignment failed")
+    from .round_trip_dispatch import assign_pending_round_trips_safely
+    assign_pending_round_trips_safely()
+    return result
 
 
 def _assignment_payload(package, biker):
