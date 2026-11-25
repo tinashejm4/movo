@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from django.db import transaction
 from django.utils import timezone
 
@@ -7,18 +5,18 @@ from ..models import (RoundTripAssignment, RoundTripCashEvent,
                       RoundTripOrder, RoundTripStop,
                       RoundTripVerificationAttempt)
 from .round_trip_notifications import notify_round_trip
-from .round_trip_otp import check_stop_otp, issue_stop_otp
+from .round_trip_otp import OTP_MAX_FAILURES, check_stop_otp
 
 
 def _active_stop(order):
     return order.stops.filter(completed_at__isnull=True).order_by("sequence").first()
 
 
-def _current_assignment(order, assignment_id, user):
+def _current_assignment(order, user):
     return RoundTripAssignment.objects.filter(
-        pk=assignment_id, order=order, biker=order.biker, biker__user=user,
+        order=order, biker=order.biker, biker__user=user,
         ended_at__isnull=True,
-    ).first()
+    ).order_by("-assigned_at").first()
 
 
 def _advance_order(order, stop, assignment, now):
@@ -50,7 +48,6 @@ def _advance_order(order, stop, assignment, now):
     else:
         order.status = "In Transit"
         order.save(update_fields=["status"])
-        issue_stop_otp(next_stop, assignment)
 
 
 @transaction.atomic
@@ -58,7 +55,9 @@ def verify_round_trip_stop(*, order_id, stop_id, user, data):
     order = RoundTripOrder.objects.select_for_update().filter(pk=order_id).first()
     if order is None:
         return None, "Order not found", 404
-    assignment = _current_assignment(order, data["assignment_id"], user)
+    assignment = order.assignments.filter(
+        biker=order.biker, biker__user=user, ended_at__isnull=True,
+    ).order_by("-assigned_at").first()
     if assignment is None:
         return None, "Active assignment required", 403
     stop = RoundTripStop.objects.select_for_update().filter(pk=stop_id, order=order).first()
@@ -68,17 +67,25 @@ def verify_round_trip_stop(*, order_id, stop_id, user, data):
         return None, "Order is not ready for verification", 409
     if _active_stop(order).pk != stop.pk:
         return None, "Only the active stop can be verified", 409
-    reason = check_stop_otp(stop, assignment, data["otp"])
+    reason = check_stop_otp(stop, data["otp"])
     if reason:
         RoundTripVerificationAttempt.objects.create(
             stop=stop, assignment=assignment, biker=assignment.biker,
             reason=reason,
         )
+        if reason == "invalid_code" and stop.otp_failures >= OTP_MAX_FAILURES:
+            order.status = "Exception"
+            order.exception_reason = "otp_attempt_limit"
+            order.save(update_fields=["status", "exception_reason"])
+            notify_round_trip(
+                order=order, user_ids=[order.sender.user_id],
+                event_type="round_trip.exception", title="Round trip needs review",
+                body="Too many incorrect stop code attempts. Staff review is required.",
+                suffix=f"{stop.pk}:otp-lockout",
+            )
         return None, reason, 400
     if stop.kind == "recipient" and not hasattr(stop, "pod"):
         return None, "Recipient POD is required", 400
-    if stop.kind == "recipient" and stop.pod.assignment_id != assignment.pk:
-        return None, "POD belongs to a different assignment", 409
 
     if stop.kind in {"recipient", "sender_return"}:
         amount = data.get("cash_amount")
@@ -119,22 +126,3 @@ def verify_round_trip_stop(*, order_id, stop_id, user, data):
     )
     _advance_order(order, stop, assignment, now)
     return order, None, 200
-
-
-@transaction.atomic
-def resend_round_trip_otp(*, order_id, stop_id, user, is_staff=False):
-    order = RoundTripOrder.objects.select_for_update().filter(pk=order_id).first()
-    if not order:
-        return "Order not found", 404
-    stop = _active_stop(order)
-    if not stop or stop.pk != stop_id or order.status not in {"Assigned", "In Transit"}:
-        return "Only the active stop can receive a new code", 409
-    if user.pk != stop.contact.user_id and not is_staff:
-        return "Stop contact or staff access required", 403
-    assignment = order.assignments.filter(ended_at__isnull=True).order_by("-assigned_at").first()
-    if not assignment:
-        return "Active assignment required", 409
-    if stop.otp_issued_at and timezone.now() - stop.otp_issued_at < timedelta(seconds=60):
-        return "Wait one minute before requesting another code", 429
-    issue_stop_otp(stop, assignment)
-    return None, 200

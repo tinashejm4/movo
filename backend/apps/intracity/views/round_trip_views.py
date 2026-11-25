@@ -15,7 +15,7 @@ from ..models import RoundTripOrder, RoundTripPOD
 from ..serializers.round_trip_serializers import (
     RoundTripCancelSerializer, RoundTripCreateSerializer, RoundTripDetailSerializer,
     RoundTripFailureSerializer, RoundTripListSerializer, RoundTripPODUploadSerializer,
-    RoundTripErrorSerializer, RoundTripMessageSerializer, RoundTripPODResponseSerializer,
+    RoundTripErrorSerializer, RoundTripPODResponseSerializer,
     RoundTripPriceInputSerializer, RoundTripPriceOutputSerializer,
     RoundTripResolveSerializer, RoundTripVerifySerializer,
 )
@@ -25,7 +25,7 @@ from ..services.round_trip_pod import upload_round_trip_pod
 from ..services.round_trip_presenter import order_payload
 from ..services.round_trip_pricing import calculate_round_trip_price
 from ..services.round_trip_resolution import cancel_round_trip, fail_round_trip_stop, resolve_round_trip
-from ..services.round_trip_stop import resend_round_trip_otp, verify_round_trip_stop
+from ..services.round_trip_stop import verify_round_trip_stop
 
 
 class RoundTripPagination(PageNumberPagination):
@@ -103,19 +103,6 @@ class RoundTripViewSet(ViewSet):
             return Response({"error": error}, status=code)
         order = _order_queryset().get(pk=order.pk)
         return Response(RoundTripDetailSerializer(order_payload(order, detail=True)).data)
-
-    @extend_schema(tags=["intracity/Round Trips"], request=None,
-                   responses={200: RoundTripMessageSerializer, 403: RoundTripErrorSerializer,
-                              404: RoundTripErrorSerializer, 409: RoundTripErrorSerializer,
-                              429: RoundTripErrorSerializer})
-    def resend_otp(self, request, pk, stop_id):
-        error, code = resend_round_trip_otp(
-            order_id=pk, stop_id=int(stop_id), user=request.user,
-            is_staff=is_round_trip_staff(request.user),
-        )
-        if error:
-            return Response({"error": error}, status=code)
-        return Response({"message": "New OTP sent to the stop contact"})
 
     @extend_schema(tags=["intracity/Round Trips"], request=RoundTripFailureSerializer,
                    responses={200: RoundTripDetailSerializer, 403: RoundTripErrorSerializer,

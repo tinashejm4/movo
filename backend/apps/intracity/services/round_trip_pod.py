@@ -11,9 +11,8 @@ def upload_round_trip_pod(*, order_id, stop_id, user, data):
     if not order:
         return None, "Order not found", 404
     assignment = RoundTripAssignment.objects.filter(
-        pk=data["assignment_id"], order=order, biker=order.biker,
-        biker__user=user,
-    ).first()
+        order=order, biker=order.biker, biker__user=user, ended_at__isnull=True,
+    ).order_by("-assigned_at").first()
     if not assignment:
         return None, "Active assignment required", 403
     stop = RoundTripStop.objects.select_for_update().filter(

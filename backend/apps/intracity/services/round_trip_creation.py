@@ -9,6 +9,7 @@ from ..models import (Invoice, RoundTripOrder, RoundTripParcel, RoundTripStop,
                       RoundTripStopAction)
 from .customer_provisioning import resolve_or_create_customer
 from .round_trip_pricing import calculate_round_trip_price
+from .round_trip_otp import issue_stop_otp
 
 
 STOP_ACTIONS = {
@@ -52,6 +53,7 @@ def create_round_trip(*, user, data):
     ):
         stop = RoundTripStop.objects.create(order=order, sequence=sequence, kind=kind,
                                             area=area, address=address, contact=contact_customer)
+        issue_stop_otp(stop)
         RoundTripStopAction.objects.bulk_create([
             RoundTripStopAction(stop=stop, action=action) for action in STOP_ACTIONS[kind]
         ])

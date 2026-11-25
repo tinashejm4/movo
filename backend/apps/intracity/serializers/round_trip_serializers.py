@@ -67,14 +67,12 @@ class RoundTripCreateSerializer(serializers.Serializer):
 
 
 class RoundTripVerifySerializer(serializers.Serializer):
-    assignment_id = serializers.UUIDField()
     otp = serializers.RegexField(regex=r"^\d{6}$")
     cash_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0.00"), required=False)
     cash_currency = serializers.ChoiceField(choices=("USD", "ZIG"), required=False)
 
 
 class RoundTripPODUploadSerializer(serializers.Serializer):
-    assignment_id = serializers.UUIDField()
     upload_id = serializers.UUIDField()
     image = serializers.ImageField()
 
@@ -84,7 +82,6 @@ class RoundTripCancelSerializer(serializers.Serializer):
 
 
 class RoundTripFailureSerializer(serializers.Serializer):
-    assignment_id = serializers.UUIDField()
     reason = serializers.CharField(max_length=120)
 
 
@@ -122,10 +119,6 @@ class RoundTripPODResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     stop_id = serializers.IntegerField()
     uploaded_at = serializers.DateTimeField()
-
-
-class RoundTripMessageSerializer(serializers.Serializer):
-    message = serializers.CharField()
 
 
 class RoundTripListItemSerializer(serializers.Serializer):

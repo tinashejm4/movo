@@ -4,7 +4,6 @@ from django.utils import timezone
 from ..models import RoundTripCashEvent, RoundTripOrder, RoundTripResolution
 from .invoice_owner import ensure_invoice_refund_review
 from .round_trip_notifications import notify_round_trip
-from .round_trip_otp import issue_stop_otp
 from .round_trip_stop import _active_stop, _current_assignment, _advance_order
 
 
@@ -13,7 +12,7 @@ def fail_round_trip_stop(*, order_id, stop_id, user, data):
     order = RoundTripOrder.objects.select_for_update().filter(pk=order_id).first()
     if not order:
         return None, "Order not found", 404
-    assignment = _current_assignment(order, data["assignment_id"], user)
+    assignment = _current_assignment(order, user)
     if not assignment:
         return None, "Active assignment required", 403
     stop = _active_stop(order)
@@ -106,8 +105,9 @@ def resolve_round_trip(*, order_id, user, data):
             cash_event.save(update_fields=["amount", "currency"])
             _advance_order(order, stop, assignment, timezone.now())
         else:
+            stop.otp_failures = 0
+            stop.save(update_fields=["otp_failures"])
             order.status = "Assigned" if stop.sequence == 1 else "In Transit"
-            issue_stop_otp(stop, assignment)
     else:
         order.status = "Cancelled"
         now = timezone.now()

@@ -2,12 +2,11 @@ from io import BytesIO
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
-from uuid import uuid4
 
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -23,6 +22,11 @@ from ..models import (Invoice, Package, PackageStatus, Price, RoundTripCashEvent
 from ..services.round_trip_dispatch import assign_pending_round_trips
 from ..services.package_assignment import assign_pending_packages, is_biker_busy
 
+TEST_STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+
 
 def pod_image():
     output = BytesIO()
@@ -30,6 +34,7 @@ def pod_image():
     return SimpleUploadedFile("pod.png", output.getvalue(), content_type="image/png")
 
 
+@override_settings(STORAGES=TEST_STORAGES)
 class RoundTripBackendTests(TestCase):
     def setUp(self):
         self.city = City.objects.create(name="Harare")
@@ -62,7 +67,11 @@ class RoundTripBackendTests(TestCase):
         }
 
     def create_order(self):
-        response = self.client.post(reverse("intracity_round_trip_collection"), self.request_data(), format="json")
+        with patch("apps.intracity.services.round_trip_otp.secrets.randbelow",
+                   side_effect=[123456, 234567, 345678]):
+            response = self.client.post(
+                reverse("intracity_round_trip_collection"), self.request_data(), format="json",
+            )
         self.assertEqual(response.status_code, 201, response.data)
         return RoundTripOrder.objects.get(pk=response.data["round_trip_id"])
 
@@ -76,9 +85,10 @@ class RoundTripBackendTests(TestCase):
 
     def verify(self, order, stop, assignment, **cash):
         self.client.force_authenticate(self.biker_user)
+        otp = {1: "123456", 2: "234567", 3: "345678"}[stop.sequence]
         return self.client.post(
             reverse("intracity_round_trip_verify", kwargs={"pk": order.pk, "stop_id": stop.pk}),
-            {"assignment_id": str(assignment.pk), "otp": "123456", **cash}, format="json",
+            {"otp": otp, **cash}, format="json",
         )
 
     def test_create_quote_and_separate_paginated_list(self):
@@ -123,7 +133,7 @@ class RoundTripBackendTests(TestCase):
         self.client.force_authenticate(self.biker_user)
         wrong = self.client.post(
             reverse("intracity_round_trip_verify", kwargs={"pk": order.pk, "stop_id": pickup.pk}),
-            {"assignment_id": str(assignment.pk), "otp": "000000"}, format="json",
+            {"otp": "000000"}, format="json",
         )
         self.assertEqual(wrong.status_code, 400)
         self.assertTrue(RoundTripVerificationAttempt.objects.filter(stop=pickup, reason="invalid_code").exists())
@@ -134,7 +144,7 @@ class RoundTripBackendTests(TestCase):
         image = pod_image()
         pod_url = reverse("intracity_round_trip_pod", kwargs={"pk": order.pk, "stop_id": recipient.pk})
         uploaded = self.client.post(pod_url, {
-            "assignment_id": str(assignment.pk), "upload_id": "77777777-7777-4777-8777-777777777777",
+            "upload_id": "77777777-7777-4777-8777-777777777777",
             "image": image,
         }, format="multipart")
         self.assertEqual(uploaded.status_code, 201, uploaded.data)
@@ -193,7 +203,7 @@ class RoundTripBackendTests(TestCase):
         image = pod_image()
         self.assertEqual(self.client.post(
             reverse("intracity_round_trip_pod", kwargs={"pk": order.pk, "stop_id": recipient.pk}),
-            {"assignment_id": str(assignment.pk), "upload_id": "88888888-8888-4888-8888-888888888888", "image": image},
+            {"upload_id": "88888888-8888-4888-8888-888888888888", "image": image},
             format="multipart",
         ).status_code, 201)
         mismatch = self.verify(order, recipient, assignment, cash_amount="20.00", cash_currency="USD")
@@ -223,21 +233,51 @@ class RoundTripBackendTests(TestCase):
         self.client.force_authenticate(self.stranger)
         self.assertEqual(self.client.get(reverse("intracity_invoice_details"), {"invoice_id": order.invoice.pk}).status_code, 403)
 
-    def test_stop_code_is_bound_to_assignment_and_contact(self):
-        order = self.create_order()
-        assignment = self.assign(order)
+    @patch("apps.intracity.services.round_trip_otp.send_round_trip_sms")
+    def test_stop_codes_are_created_once_at_order_creation(self, send_sms):
+        with patch("apps.intracity.services.round_trip_dispatch.assign_pending_round_trips_safely"):
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                order = self.create_order()
+        self.assertEqual(len(callbacks), 4)  # three SMS sends plus dispatch
+        self.assertEqual(send_sms.call_count, 3)
+        self.assertEqual(send_sms.call_args_list[0].args[0], self.sender_user.username)
+        self.assertEqual(send_sms.call_args_list[1].args[0], self.recipient_user.username)
+        self.assertEqual(send_sms.call_args_list[2].args[0], self.sender_user.username)
+        self.assign(order)
+        order.refresh_from_db()
         pickup = order.stops.get(sequence=1)
         verify_url = reverse("intracity_round_trip_verify", kwargs={"pk": order.pk, "stop_id": pickup.pk})
-        resend_url = reverse("intracity_round_trip_resend_otp", kwargs={"pk": order.pk, "stop_id": pickup.pk})
+        original_hash = pickup.otp_hash
+        self.assertTrue(original_hash)
+        self.assertTrue(pickup.otp_issued_at)
+        self.assertEqual(order.stops.get(sequence=2).otp_hash != pickup.otp_hash, True)
         self.client.force_authenticate(self.biker_user)
-        wrong_assignment = self.client.post(verify_url, {
-            "assignment_id": str(uuid4()), "otp": "123456",
+        self.assertEqual(self.client.post(verify_url, {"otp": "123456"}, format="json").status_code, 200)
+        pickup.refresh_from_db()
+        self.assertEqual(pickup.otp_hash, original_hash)
+
+    def test_fixed_code_lockout_requires_staff_resume_without_reissuing(self):
+        order = self.create_order()
+        self.assign(order)
+        pickup = order.stops.get(sequence=1)
+        verify_url = reverse("intracity_round_trip_verify", kwargs={"pk": order.pk, "stop_id": pickup.pk})
+        self.client.force_authenticate(self.biker_user)
+        for _ in range(5):
+            response = self.client.post(verify_url, {"otp": "000000"}, format="json")
+            self.assertEqual(response.status_code, 400)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "Exception")
+        original_hash = pickup.otp_hash
+        self.client.force_authenticate(self.staff)
+        resolution = self.client.post(reverse("intracity_round_trip_resolve", kwargs={"pk": order.pk}), {
+            "outcome": "resume", "reason": "Confirmed sender still has the original code",
         }, format="json")
-        self.assertEqual(wrong_assignment.status_code, 403)
-        self.client.force_authenticate(self.stranger)
-        self.assertEqual(self.client.post(resend_url, {}, format="json").status_code, 403)
-        self.client.force_authenticate(self.sender_user)
-        self.assertEqual(self.client.post(resend_url, {}, format="json").status_code, 429)
+        self.assertEqual(resolution.status_code, 200, resolution.data)
+        pickup.refresh_from_db()
+        self.assertEqual(pickup.otp_hash, original_hash)
+        self.assertEqual(pickup.otp_failures, 0)
+        self.client.force_authenticate(self.biker_user)
+        self.assertEqual(self.client.post(verify_url, {"otp": "123456"}, format="json").status_code, 200)
 
     @patch("apps.intracity.views.payments_views.requests.post")
     def test_round_trip_ecocash_uses_sender_and_order_reference(self, post):

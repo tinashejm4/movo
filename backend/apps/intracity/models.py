@@ -304,7 +304,6 @@ class RoundTripStop(models.Model):
     otp_hash = models.CharField(max_length=128, blank=True)
     otp_issued_at = models.DateTimeField(null=True, blank=True)
     otp_used_at = models.DateTimeField(null=True, blank=True)
-    otp_assignment = models.ForeignKey(RoundTripAssignment, on_delete=models.SET_NULL, null=True, blank=True)
     otp_failures = models.PositiveSmallIntegerField(default=0)
 
     class Meta:

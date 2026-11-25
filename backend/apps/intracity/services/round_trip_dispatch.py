@@ -10,7 +10,6 @@ from apps.users.models import Biker
 from ..models import RoundTripAssignment, RoundTripOrder
 from .package_assignment import is_biker_busy
 from .round_trip_notifications import notify_round_trip
-from .round_trip_otp import issue_stop_otp
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +29,13 @@ def assign_pending_round_trips():
         order.save(update_fields=["biker", "assigned_at", "status"])
         assignment = RoundTripAssignment.objects.create(order=order, biker=biker)
         first_stop = order.stops.get(sequence=1)
-        issue_stop_otp(first_stop, assignment)
         notify_round_trip(
             order=order, user_ids=[order.sender.user_id, order.recipient.user_id, biker.user_id],
             event_type="round_trip.assigned", title="Round trip assigned",
             body="A driver has been assigned to the round trip.", suffix=str(assignment.pk),
         )
         payloads.append({"round_trip_id": order.pk, "slug": order.slug,
-                         "assignment_id": str(assignment.pk), "biker_id": biker.pk,
+                         "biker_id": biker.pk,
                          "active_stop_id": first_stop.pk})
     transaction.on_commit(lambda: _publish_assignments(payloads))
     return {"assigned_count": len(payloads), "assigned_orders": payloads,
