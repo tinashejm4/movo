@@ -460,7 +460,10 @@ class MileageRecordReadTests(TestCase):
         response = self.client.get("/api/vehicles/mileage-records/")
 
         self.assertEqual(response.status_code, 200)
-        data = {item["id"]: item for item in response.data}
+        data = {item["id"]: item for item in response.data["results"]}
+        self.assertEqual(response.data["count"], 2)
+        self.assertIsNone(response.data["next"])
+        self.assertIsNone(response.data["previous"])
         self.assertIsNone(data[earlier.pk]["previous_odometer_km"])
         self.assertIsNone(data[earlier.pk]["distance_travelled_km"])
         self.assertEqual(data[current.pk]["previous_odometer_km"], 1200)
@@ -480,7 +483,7 @@ class MileageRecordReadTests(TestCase):
         response = self.client.get("/api/vehicles/mileage-records/")
 
         self.assertEqual(response.status_code, 200)
-        data = {item["id"]: item for item in response.data}
+        data = {item["id"]: item for item in response.data["results"]}
         self.assertEqual(data[same_time.pk]["previous_odometer_km"], first.odometer_km)
         self.assertEqual(data[same_time.pk]["distance_travelled_km"], 50)
         self.assertIsNone(data[other.pk]["previous_odometer_km"])
@@ -492,7 +495,29 @@ class MileageRecordReadTests(TestCase):
         response = self.client.get(f"/api/vehicles/mileage-records/?vehicle_id={self.vehicle.pk}")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([item["id"] for item in response.data], [own.pk])
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual([item["id"] for item in response.data["results"]], [own.pk])
+
+    def test_list_is_paginated_to_twenty_records_with_stable_navigation(self):
+        recorded_at = timezone.now()
+        records = [self.make_record(self.vehicle, 100 + index, recorded_at) for index in range(21)]
+
+        first_page = self.client.get("/api/vehicles/mileage-records/?page_size=1")
+        second_page = self.client.get("/api/vehicles/mileage-records/?page=2")
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.data["count"], 21)
+        self.assertEqual(len(first_page.data["results"]), 20)
+        self.assertIsNotNone(first_page.data["next"])
+        self.assertIsNone(first_page.data["previous"])
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(len(second_page.data["results"]), 1)
+        self.assertIsNone(second_page.data["next"])
+        self.assertIsNotNone(second_page.data["previous"])
+        first_ids = {record["id"] for record in first_page.data["results"]}
+        second_ids = {record["id"] for record in second_page.data["results"]}
+        self.assertEqual(first_ids | second_ids, {record.pk for record in records})
+        self.assertFalse(first_ids & second_ids)
 
     def test_vehicle_id_filter_rejects_invalid_value(self):
         response = self.client.get("/api/vehicles/mileage-records/?vehicle_id=unknown")

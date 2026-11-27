@@ -4,6 +4,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -33,8 +34,13 @@ class RecordedByViewSet(viewsets.ModelViewSet):
         serializer.save(recorded_by=self.request.user)
 
 
+class MileageRecordPagination(PageNumberPagination):
+    page_size = 20
+
+
 class MileageRecordViewSet(RecordedByViewSet):
     serializer_class = MileageRecordSerializer
+    pagination_class = MileageRecordPagination
 
     def get_queryset(self):
         vehicle_id = self.request.query_params.get("vehicle_id")
