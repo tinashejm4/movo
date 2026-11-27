@@ -144,7 +144,7 @@ class RoundTripDetailSerializer(RoundTripListItemSerializer):
     cash_collected = serializers.DecimalField(max_digits=10, decimal_places=2)
     cash_returned = serializers.DecimalField(max_digits=10, decimal_places=2)
     invoice_id = serializers.IntegerField()
-    delivery_fee = serializers.DecimalField(max_digits=10, decimal_places=2)
+    # delivery_fee = serializers.DecimalField(max_digits=10, decimal_places=2)
     assigned_at = serializers.DateTimeField(allow_null=True)
     completed_at = serializers.DateTimeField(allow_null=True)
     exception_reason = serializers.CharField()
