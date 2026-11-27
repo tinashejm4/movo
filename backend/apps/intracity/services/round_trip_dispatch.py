@@ -3,6 +3,7 @@ import logging
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.users.models import Biker
@@ -19,6 +20,9 @@ def assign_pending_round_trips():
     bikers = list(Biker.objects.select_for_update().order_by("pk"))
     orders = list(RoundTripOrder.objects.select_for_update().filter(
         status="Pending",
+    ).filter(
+        Q(is_renewed=False, created_at__date=timezone.localdate())
+        | Q(is_renewed=True, renewed_at__date=timezone.localdate())
     ).order_by("-is_fast_delivery", "created_at", "pk"))
     free = [biker for biker in bikers if not is_biker_busy(biker)]
     payloads = []

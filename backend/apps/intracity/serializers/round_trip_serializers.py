@@ -128,6 +128,9 @@ class RoundTripListItemSerializer(serializers.Serializer):
     status = serializers.CharField()
     parcel_description = serializers.CharField()
     created_at = serializers.DateTimeField()
+    is_renewed = serializers.BooleanField()
+    can_renew = serializers.BooleanField()
+    pickup_date = serializers.DateField()
     driver_id = serializers.IntegerField(allow_null=True)
     active_stop = RoundTripStopOutputSerializer(allow_null=True)
 
@@ -153,3 +156,10 @@ class RoundTripListSerializer(serializers.Serializer):
     next = serializers.URLField(allow_null=True)
     previous = serializers.URLField(allow_null=True)
     results = RoundTripListItemSerializer(many=True)
+
+
+class RoundTripRenewResponseSerializer(serializers.Serializer):
+    round_trip_id = serializers.IntegerField()
+    status = serializers.CharField()
+    is_renewed = serializers.BooleanField()
+    pickup_date = serializers.DateField()

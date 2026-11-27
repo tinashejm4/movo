@@ -1,6 +1,7 @@
 from django.urls import reverse
 
 from .round_trip_otp import reveal_stop_otp
+from .round_trip_expiration import pickup_date
 
 
 def stop_payload(stop, *, user):
@@ -34,6 +35,10 @@ def order_payload(order, *, user, detail=False):
         "status": order.status,
         "parcel_description": order.parcel.description,
         "created_at": order.created_at,
+        "is_renewed": order.is_renewed,
+        "can_renew": (order.status == "Expired" and not order.is_renewed
+                      and user.id == order.sender.user_id),
+        "pickup_date": pickup_date(order),
         "driver_id": order.biker_id,
         "active_stop": stop_payload(active_stop, user=user) if active_stop and order.status not in {"Cancelled", "Completed"} else None,
     }

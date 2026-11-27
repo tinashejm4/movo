@@ -9,17 +9,20 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from datetime import timedelta
 from rest_framework.test import APIClient
 from PIL import Image
 
 from apps.users.models import Biker, City, Customer, Suburb
 from apps.bookkeeping.models import Account, IntracitySale
 from apps.transporters.models import BikerDailySession
+from apps.notifications.models import Notification
 
-from ..models import (Invoice, Package, PackageStatus, Price, RoundTripCashEvent, RoundTripOrder,
+from ..models import (Invoice, Package, PackageStatus, Price, RoundTripAssignment, RoundTripCashEvent, RoundTripOrder,
                       PaynowPayment, RefundReview, RoundTripPOD, RoundTripResolution,
                       RoundTripVerificationAttempt)
 from ..services.round_trip_dispatch import assign_pending_round_trips
+from ..services.round_trip_expiration import expire_uncollected_round_trips
 from ..services.package_assignment import assign_pending_packages, is_biker_busy
 
 TEST_STORAGES = {
@@ -335,3 +338,85 @@ class RoundTripBackendTests(TestCase):
         self.assertEqual(second.status_code, 200, second.data)
         self.assertTrue(RefundReview.objects.filter(invoice=order.invoice, recipient=self.sender).exists())
         self.assertEqual(IntracitySale.objects.filter(invoice=order.invoice).count(), 1)
+
+    def test_round_trip_expiry_and_renewal_lifecycle(self):
+        order = self.create_order()
+        old_pickup = timezone.now() - timedelta(days=1)
+        RoundTripOrder.objects.filter(pk=order.pk).update(created_at=old_pickup)
+        order.refresh_from_db()
+        self.assertEqual(expire_uncollected_round_trips(today=timezone.localdate()), {"expired": 1, "cancelled": 0})
+        order.refresh_from_db()
+        self.assertEqual(order.status, "Expired")
+        self.assertEqual(order.assignments.filter(ended_at__isnull=True).count(), 0)
+        expired_users = set(Notification.objects.filter(
+            event_type="round_trip.expired", payload__round_trip_id=order.pk,
+        ).values_list("user_id", flat=True))
+        self.assertEqual(expired_users, {self.sender_user.pk, self.recipient_user.pk})
+        self.assertEqual(expire_uncollected_round_trips(today=timezone.localdate()), {"expired": 0, "cancelled": 0})
+
+        renew_url = reverse("intracity_round_trip_renew", kwargs={"pk": order.pk})
+        self.client.force_authenticate(self.stranger)
+        self.assertEqual(self.client.post(renew_url).status_code, 403)
+        self.client.force_authenticate(self.sender_user)
+        with patch("apps.intracity.services.round_trip_renewal.assign_pending_round_trips_safely"):
+            response = self.client.post(renew_url)
+        self.assertEqual(response.status_code, 200, response.data)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "Pending")
+        self.assertTrue(order.is_renewed)
+        self.assertEqual(response.data["pickup_date"], timezone.localdate())
+        with patch("apps.intracity.services.round_trip_renewal.assign_pending_round_trips_safely"):
+            self.assertEqual(self.client.post(renew_url).status_code, 409)
+
+        order.invoice.is_paid = True
+        order.invoice.save(update_fields=["is_paid"])
+        RoundTripOrder.objects.filter(pk=order.pk).update(renewed_at=old_pickup)
+        self.assertEqual(expire_uncollected_round_trips(today=timezone.localdate()), {"expired": 0, "cancelled": 1})
+        order.refresh_from_db()
+        self.assertEqual(order.status, "Cancelled")
+        self.assertTrue(RefundReview.objects.filter(invoice=order.invoice, recipient=self.sender).exists())
+
+    def test_missed_renewal_does_not_create_refund_for_unpaid_invoice(self):
+        order = self.create_order()
+        old_pickup = timezone.now() - timedelta(days=1)
+        RoundTripOrder.objects.filter(pk=order.pk).update(created_at=old_pickup)
+        expire_uncollected_round_trips(today=timezone.localdate())
+        self.client.force_authenticate(self.sender_user)
+        with patch("apps.intracity.services.round_trip_renewal.assign_pending_round_trips_safely"):
+            self.assertEqual(self.client.post(reverse("intracity_round_trip_renew", kwargs={"pk": order.pk})).status_code, 200)
+        RoundTripOrder.objects.filter(pk=order.pk).update(renewed_at=old_pickup)
+        self.assertEqual(expire_uncollected_round_trips(today=timezone.localdate()), {"expired": 0, "cancelled": 1})
+        self.assertFalse(RefundReview.objects.filter(invoice=order.invoice).exists())
+
+    def test_round_trip_expiry_does_not_cancel_unpaid_or_in_transit_orders(self):
+        order = self.create_order()
+        old_pickup = timezone.now() - timedelta(days=1)
+        RoundTripOrder.objects.filter(pk=order.pk).update(created_at=old_pickup, status="In Transit")
+        self.assertEqual(expire_uncollected_round_trips(today=timezone.localdate()), {"expired": 0, "cancelled": 0})
+        order.refresh_from_db()
+        self.assertEqual(order.status, "In Transit")
+        self.assertFalse(RefundReview.objects.exists())
+
+    def test_assigned_round_trip_expiry_releases_biker_and_closes_assignment(self):
+        order = self.create_order()
+        assignment = RoundTripAssignment.objects.create(order=order, biker=self.biker)
+        RoundTripOrder.objects.filter(pk=order.pk).update(
+            created_at=timezone.now() - timedelta(days=1), status="Assigned",
+            biker=self.biker, assigned_at=timezone.now() - timedelta(days=1),
+        )
+        self.assertEqual(expire_uncollected_round_trips(today=timezone.localdate()), {"expired": 1, "cancelled": 0})
+        order.refresh_from_db()
+        assignment.refresh_from_db()
+        self.assertEqual(order.status, "Expired")
+        self.assertIsNone(order.biker_id)
+        self.assertIsNone(order.assigned_at)
+        self.assertIsNotNone(assignment.ended_at)
+
+    def test_dispatch_skips_stale_round_trip(self):
+        order = self.create_order()
+        RoundTripOrder.objects.filter(pk=order.pk).update(created_at=timezone.now() - timedelta(days=1))
+        with patch("apps.intracity.services.round_trip_dispatch.is_biker_busy", return_value=False):
+            result = assign_pending_round_trips()
+        self.assertEqual(result["assigned_count"], 0)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "Pending")

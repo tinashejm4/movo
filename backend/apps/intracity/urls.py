@@ -44,6 +44,7 @@ round_trip_pod = RoundTripViewSet.as_view({"post": "upload_pod", "get": "downloa
                                          parser_classes=[MultiPartParser, FormParser])
 round_trip_cancel = RoundTripViewSet.as_view({"post": "cancel"})
 round_trip_resolve = RoundTripViewSet.as_view({"post": "resolve"})
+round_trip_renew = RoundTripViewSet.as_view({"post": "renew"})
 
 
 urlpatterns = [
@@ -51,6 +52,7 @@ urlpatterns = [
     path("round-trips/", round_trip_collection, name="intracity_round_trip_collection"),
     path("round-trips/<int:pk>/", round_trip_detail, name="intracity_round_trip_detail"),
     path("round-trips/<int:pk>/cancel/", round_trip_cancel, name="intracity_round_trip_cancel"),
+    path("round-trips/<int:pk>/renew/", round_trip_renew, name="intracity_round_trip_renew"),
     path("round-trips/<int:pk>/resolve/", round_trip_resolve, name="intracity_round_trip_resolve"),
     path("round-trips/<int:pk>/stops/<int:stop_id>/verify/", round_trip_verify, name="intracity_round_trip_verify"),
     path("round-trips/<int:pk>/stops/<int:stop_id>/fail/", round_trip_fail, name="intracity_round_trip_fail"),

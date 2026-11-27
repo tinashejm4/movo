@@ -18,6 +18,7 @@ from ..serializers.round_trip_serializers import (
     RoundTripErrorSerializer, RoundTripPODResponseSerializer,
     RoundTripPriceInputSerializer, RoundTripPriceOutputSerializer,
     RoundTripResolveSerializer, RoundTripVerifySerializer,
+    RoundTripRenewResponseSerializer,
 )
 from ..services.round_trip_access import is_round_trip_staff, visible_round_trips
 from ..services.round_trip_creation import create_round_trip
@@ -25,6 +26,8 @@ from ..services.round_trip_pod import upload_round_trip_pod
 from ..services.round_trip_presenter import order_payload
 from ..services.round_trip_pricing import calculate_round_trip_price
 from ..services.round_trip_resolution import cancel_round_trip, fail_round_trip_stop, resolve_round_trip
+from ..services.round_trip_expiration import pickup_date
+from ..services.round_trip_renewal import renew_round_trip
 from ..services.round_trip_stop import verify_round_trip_stop
 
 
@@ -160,6 +163,19 @@ class RoundTripViewSet(ViewSet):
         if error:
             return Response({"error": error}, status=code)
         return Response(RoundTripDetailSerializer(order_payload(_order_queryset().get(pk=order.pk), user=request.user, detail=True)).data)
+
+    @extend_schema(tags=["intracity/Round Trips"], responses={
+        200: RoundTripRenewResponseSerializer, 403: RoundTripErrorSerializer,
+        404: RoundTripErrorSerializer, 409: RoundTripErrorSerializer,
+    })
+    def renew(self, request, pk):
+        order, error, code = renew_round_trip(order_id=pk, user=request.user)
+        if error:
+            return Response({"error": error}, status=code)
+        return Response({
+            "round_trip_id": order.pk, "status": order.status,
+            "is_renewed": order.is_renewed, "pickup_date": pickup_date(order),
+        }, status=200)
 
     @extend_schema(tags=["intracity/Round Trips"], request=RoundTripResolveSerializer,
                    responses={200: RoundTripDetailSerializer, 400: RoundTripErrorSerializer,

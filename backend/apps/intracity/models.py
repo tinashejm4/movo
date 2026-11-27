@@ -249,7 +249,7 @@ class PaynowPayment(models.Model):
 
 class RoundTripOrder(models.Model):
     STATUS = [(value, value) for value in (
-        "Pending", "Assigned", "In Transit", "Exception", "Completed", "Cancelled"
+        "Pending", "Assigned", "In Transit", "Exception", "Completed", "Expired", "Cancelled"
     )]
     slug = models.SlugField(max_length=32, unique=True, editable=False)
     sender = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="round_trips_sent")
@@ -264,6 +264,9 @@ class RoundTripOrder(models.Model):
     assigned_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    expired_at = models.DateTimeField(null=True, blank=True)
+    is_renewed = models.BooleanField(default=False)
+    renewed_at = models.DateTimeField(null=True, blank=True)
     exception_reason = models.CharField(max_length=120, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
