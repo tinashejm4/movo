@@ -256,6 +256,22 @@ class RoundTripBackendTests(TestCase):
         pickup.refresh_from_db()
         self.assertEqual(pickup.otp_hash, original_hash)
 
+    def test_stop_response_reveals_code_only_to_that_stops_contact(self):
+        order = self.create_order()
+        detail_url = reverse("intracity_round_trip_detail", kwargs={"pk": order.pk})
+        sender_response = self.client.get(detail_url)
+        self.assertEqual([stop["otp"] for stop in sender_response.data["stops"]],
+                         ["123456", None, "345678"])
+        self.client.force_authenticate(self.recipient_user)
+        recipient_response = self.client.get(detail_url)
+        self.assertEqual([stop["otp"] for stop in recipient_response.data["stops"]],
+                         [None, "234567", None])
+        self.assign(order)
+        self.client.force_authenticate(self.biker_user)
+        biker_response = self.client.get(detail_url)
+        self.assertEqual([stop["otp"] for stop in biker_response.data["stops"]],
+                         [None, None, None])
+
     def test_fixed_code_lockout_requires_staff_resume_without_reissuing(self):
         order = self.create_order()
         self.assign(order)

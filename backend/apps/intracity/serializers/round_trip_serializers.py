@@ -106,6 +106,7 @@ class RoundTripStopOutputSerializer(serializers.Serializer):
     address = serializers.CharField()
     contact_name = serializers.CharField()
     completed_at = serializers.DateTimeField(allow_null=True)
+    otp = serializers.CharField(allow_null=True)
     actions = RoundTripActionOutputSerializer(many=True)
     has_pod = serializers.BooleanField()
     pod_url = serializers.CharField(allow_null=True)

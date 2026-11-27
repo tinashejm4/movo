@@ -1,7 +1,9 @@
 from django.urls import reverse
 
+from .round_trip_otp import reveal_stop_otp
 
-def stop_payload(stop):
+
+def stop_payload(stop, *, user):
     return {
         "id": stop.pk,
         "sequence": stop.sequence,
@@ -10,6 +12,7 @@ def stop_payload(stop):
         "address": stop.address,
         "contact_name": f"{stop.contact.user.first_name} {stop.contact.user.last_name}".strip(),
         "completed_at": stop.completed_at,
+        "otp": reveal_stop_otp(stop) if user.id == stop.contact.user_id else None,
         "actions": [
             {"type": action.action, "completed_at": action.completed_at}
             for action in stop.actions.all()
@@ -22,7 +25,7 @@ def stop_payload(stop):
     }
 
 
-def order_payload(order, *, detail=False):
+def order_payload(order, *, user, detail=False):
     stops = list(order.stops.all())
     active_stop = next((stop for stop in stops if stop.completed_at is None), None)
     payload = {
@@ -32,7 +35,7 @@ def order_payload(order, *, detail=False):
         "parcel_description": order.parcel.description,
         "created_at": order.created_at,
         "driver_id": order.biker_id,
-        "active_stop": stop_payload(active_stop) if active_stop and order.status not in {"Cancelled", "Completed"} else None,
+        "active_stop": stop_payload(active_stop, user=user) if active_stop and order.status not in {"Cancelled", "Completed"} else None,
     }
     if detail:
         cash = list(order.cash_events.all())
@@ -49,6 +52,6 @@ def order_payload(order, *, detail=False):
             "assigned_at": order.assigned_at,
             "completed_at": order.completed_at,
             "exception_reason": order.exception_reason,
-            "stops": [stop_payload(stop) for stop in stops],
+            "stops": [stop_payload(stop, user=user) for stop in stops],
         })
     return payload

@@ -59,7 +59,7 @@ class RoundTripViewSet(ViewSet):
         serializer.is_valid(raise_exception=True)
         order = create_round_trip(user=request.user, data=serializer.validated_data)
         order = get_object_or_404(_order_queryset(), pk=order.pk)
-        return Response(RoundTripDetailSerializer(order_payload(order, detail=True)).data,
+        return Response(RoundTripDetailSerializer(order_payload(order, user=request.user, detail=True)).data,
                         status=status.HTTP_201_CREATED)
 
     @extend_schema(tags=["intracity/Round Trips"],
@@ -80,14 +80,14 @@ class RoundTripViewSet(ViewSet):
             ).distinct()
         paginator = RoundTripPagination()
         page = paginator.paginate_queryset(queryset.order_by("-created_at", "-pk"), request, view=self)
-        return paginator.get_paginated_response([order_payload(order) for order in page])
+        return paginator.get_paginated_response([order_payload(order, user=request.user) for order in page])
 
     @extend_schema(tags=["intracity/Round Trips"], responses={200: RoundTripDetailSerializer,
                    404: RoundTripErrorSerializer})
     def retrieve(self, request, pk):
         order = get_object_or_404(_order_queryset().filter(
             pk__in=visible_round_trips(request.user).values("pk")), pk=pk)
-        return Response(RoundTripDetailSerializer(order_payload(order, detail=True)).data)
+        return Response(RoundTripDetailSerializer(order_payload(order, user=request.user, detail=True)).data)
 
     @extend_schema(tags=["intracity/Round Trips"], request=RoundTripVerifySerializer,
                    responses={200: RoundTripDetailSerializer, 400: RoundTripErrorSerializer,
@@ -102,7 +102,7 @@ class RoundTripViewSet(ViewSet):
         if error:
             return Response({"error": error}, status=code)
         order = _order_queryset().get(pk=order.pk)
-        return Response(RoundTripDetailSerializer(order_payload(order, detail=True)).data)
+        return Response(RoundTripDetailSerializer(order_payload(order, user=request.user, detail=True)).data)
 
     @extend_schema(tags=["intracity/Round Trips"], request=RoundTripFailureSerializer,
                    responses={200: RoundTripDetailSerializer, 403: RoundTripErrorSerializer,
@@ -115,7 +115,7 @@ class RoundTripViewSet(ViewSet):
         )
         if error:
             return Response({"error": error}, status=code)
-        return Response(RoundTripDetailSerializer(order_payload(_order_queryset().get(pk=order.pk), detail=True)).data)
+        return Response(RoundTripDetailSerializer(order_payload(_order_queryset().get(pk=order.pk), user=request.user, detail=True)).data)
 
     @extend_schema(tags=["intracity/Round Trips"], request={"multipart/form-data": RoundTripPODUploadSerializer},
                    responses={200: RoundTripPODResponseSerializer,
@@ -159,7 +159,7 @@ class RoundTripViewSet(ViewSet):
         )
         if error:
             return Response({"error": error}, status=code)
-        return Response(RoundTripDetailSerializer(order_payload(_order_queryset().get(pk=order.pk), detail=True)).data)
+        return Response(RoundTripDetailSerializer(order_payload(_order_queryset().get(pk=order.pk), user=request.user, detail=True)).data)
 
     @extend_schema(tags=["intracity/Round Trips"], request=RoundTripResolveSerializer,
                    responses={200: RoundTripDetailSerializer, 400: RoundTripErrorSerializer,
@@ -175,5 +175,5 @@ class RoundTripViewSet(ViewSet):
         )
         if error:
             return Response({"error": error}, status=code)
-        return Response(RoundTripDetailSerializer(order_payload(_order_queryset().get(pk=order.pk), detail=True)).data)
+        return Response(RoundTripDetailSerializer(order_payload(_order_queryset().get(pk=order.pk), user=request.user, detail=True)).data)
 

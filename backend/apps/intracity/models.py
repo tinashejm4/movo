@@ -302,6 +302,7 @@ class RoundTripStop(models.Model):
     contact = models.ForeignKey(Customer, on_delete=models.PROTECT)
     completed_at = models.DateTimeField(null=True, blank=True)
     otp_hash = models.CharField(max_length=128, blank=True)
+    otp_encrypted = models.TextField(blank=True)
     otp_issued_at = models.DateTimeField(null=True, blank=True)
     otp_used_at = models.DateTimeField(null=True, blank=True)
     otp_failures = models.PositiveSmallIntegerField(default=0)

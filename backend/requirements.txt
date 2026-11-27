@@ -20,3 +20,4 @@ whitenoise
 celery[redis]
 django-storages[azure]
 azure-storage-blob
+cryptography
